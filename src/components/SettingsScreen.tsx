@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Mic, Bell, CreditCard, HelpCircle, LogOut, ChevronRight, Crown, Mail, User as UserIcon, Edit2, Upload, Moon, Sparkles, Zap, BarChart3, HeadphonesIcon, Target, Check } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import { Switch } from './ui/switch';
@@ -10,7 +10,11 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Button } from './ui/button';
 import { useDarkMode } from './DarkModeContext';
-import logoImage from 'figma:asset/55b61fb4264118c3bd6634877073eea5a4b97ae9.png';
+import { useAuth } from './AuthContext';
+import { updateProfile, updateEmail } from 'firebase/auth';
+import { toast } from 'sonner';
+import { getUserProfile, updateUserProfile } from '../services/firestore';
+import logoImage from "../assets/violify-logo.jpeg";
 
 interface SettingsScreenProps {
   onNavigate: (screen: string) => void;
@@ -18,15 +22,91 @@ interface SettingsScreenProps {
 
 export default function SettingsScreen({ onNavigate }: SettingsScreenProps) {
   const { isDarkMode, toggleDarkMode } = useDarkMode();
+  const { user, signOut } = useAuth();
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [fullName, setFullName] = useState('Samarth Sharma');
-  const [email, setEmail] = useState('samarth.sharma@email.com');
-  const [phone, setPhone] = useState('+91 98765 43210');
-  const [bio, setBio] = useState('Passionate Carnatic violin learner');
-  
-  const handleSaveProfile = () => {
-    setIsEditDialogOpen(false);
-    // In a real app, this would save to backend
+  const [fullName, setFullName] = useState(user?.displayName || '');
+  const [email, setEmail] = useState(user?.email || '');
+  const [phone, setPhone] = useState('');
+  const [bio, setBio] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Load user data from Firestore on mount
+  useEffect(() => {
+    const loadUserProfile = async () => {
+      if (user?.uid) {
+        try {
+          const profile = await getUserProfile(user.uid);
+          if (profile) {
+            setFullName(profile.displayName || '');
+            setEmail(profile.email || '');
+            setPhone(profile.phone || '');
+            setBio(profile.bio || '');
+          }
+        } catch (error) {
+          console.error('Error loading user profile:', error);
+        }
+      }
+
+      // Fallback to Firebase Auth data if Firestore fails
+      if (user?.displayName) setFullName(user.displayName);
+      if (user?.email) setEmail(user.email);
+    };
+
+    loadUserProfile();
+  }, [user]);
+
+  const handleSaveProfile = async () => {
+    if (!user) return;
+
+    setIsSaving(true);
+    try {
+      // Update display name in Firebase Auth
+      if (fullName !== user.displayName) {
+        await updateProfile(user, {
+          displayName: fullName
+        });
+      }
+
+      // Update email in Firebase Auth if changed
+      if (email !== user.email && email) {
+        await updateEmail(user, email);
+      }
+
+      // Save all profile data to Firestore
+      await updateUserProfile(user.uid, {
+        displayName: fullName,
+        email: email,
+        phone: phone,
+        bio: bio
+      });
+
+      toast.success('Profile updated successfully!');
+      setIsEditDialogOpen(false);
+    } catch (error: any) {
+      console.error('Error updating profile:', error);
+
+      if (error?.code === 'auth/requires-recent-login') {
+        toast.error('Please log in again to update your email address.');
+      } else if (error?.code === 'auth/email-already-in-use') {
+        toast.error('This email is already in use by another account.');
+      } else if (error?.code === 'auth/invalid-email') {
+        toast.error('Invalid email address.');
+      } else {
+        toast.error(error?.message || 'Failed to update profile. Please try again.');
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      toast.success('Signed out successfully');
+    } catch (error: any) {
+      console.error('Error signing out:', error);
+      toast.error('Failed to sign out. Please try again.');
+    }
   };
   
   return (
@@ -41,13 +121,15 @@ export default function SettingsScreen({ onNavigate }: SettingsScreenProps) {
             <CardContent className="pt-6">
               <div className="flex items-start gap-4">
                 <Avatar className="w-20 h-20 border-4 border-[#FF901F]">
-                  <AvatarFallback className="bg-[#FF901F] text-white text-2xl">S</AvatarFallback>
+                  <AvatarFallback className="bg-[#FF901F] text-white text-2xl">
+                    {fullName ? fullName.charAt(0).toUpperCase() : user?.email?.charAt(0).toUpperCase() || 'U'}
+                  </AvatarFallback>
                 </Avatar>
                 <div className="flex-1">
                   <div className="flex items-start justify-between mb-2">
                     <div>
-                      <h2 className="text-foreground mb-1">{fullName}</h2>
-                      <p className="text-muted-foreground text-sm mb-2">{email}</p>
+                      <h2 className="text-foreground mb-1">{fullName || 'User'}</h2>
+                      <p className="text-muted-foreground text-sm mb-2">{email || 'No email'}</p>
                     </div>
                     <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
                       <DialogTrigger asChild>
@@ -67,11 +149,13 @@ export default function SettingsScreen({ onNavigate }: SettingsScreenProps) {
                           {/* Profile Picture */}
                           <div className="flex flex-col items-center gap-3">
                             <Avatar className="w-24 h-24 border-4 border-[#FF901F]">
-                              <AvatarFallback className="bg-[#FF901F] text-white text-3xl">S</AvatarFallback>
+                              <AvatarFallback className="bg-[#FF901F] text-white text-3xl">
+                                {fullName ? fullName.charAt(0).toUpperCase() : user?.email?.charAt(0).toUpperCase() || 'U'}
+                              </AvatarFallback>
                             </Avatar>
-                            <Button variant="outline" size="sm" className="gap-2">
+                            <Button variant="outline" size="sm" className="gap-2" disabled>
                               <Upload size={16} />
-                              Change Picture
+                              Change Picture (Coming Soon)
                             </Button>
                           </div>
                           
@@ -132,9 +216,10 @@ export default function SettingsScreen({ onNavigate }: SettingsScreenProps) {
                           </Button>
                           <Button
                             onClick={handleSaveProfile}
-                            className="flex-1 bg-[#FF901F] hover:bg-[#E67F0C] text-white"
+                            disabled={isSaving}
+                            className="flex-1 bg-[#FF901F] hover:bg-[#E67F0C] text-white disabled:opacity-50"
                           >
-                            Save Changes
+                            {isSaving ? 'Saving...' : 'Save Changes'}
                           </Button>
                         </div>
                       </DialogContent>
@@ -166,7 +251,7 @@ export default function SettingsScreen({ onNavigate }: SettingsScreenProps) {
             <div className="flex items-start justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="bg-white rounded-xl p-2 shadow-lg">
-                  <img src={logoImage} alt="Violify" className="w-12 h-12 object-contain" style={{ mixBlendMode: 'multiply' }} />
+                  <img src={logoImage} alt="Violify" className="w-12 h-12 object-contain" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2 mb-1">
@@ -347,7 +432,10 @@ export default function SettingsScreen({ onNavigate }: SettingsScreenProps) {
           </div>
 
           {/* Logout */}
-          <button className="w-full flex items-center justify-center gap-2 p-4 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-xl transition-colors border border-red-200 dark:border-red-900/30">
+          <button
+            onClick={handleSignOut}
+            className="w-full flex items-center justify-center gap-2 p-4 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-xl transition-colors border border-red-200 dark:border-red-900/30"
+          >
             <LogOut size={20} />
             <span>Log Out</span>
           </button>

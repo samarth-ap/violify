@@ -2,36 +2,65 @@ import { Play, Flame, Target, Clock, TrendingUp, Music, Award, ChevronRight, Che
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Progress } from './ui/progress';
-import logoImage from 'figma:asset/55b61fb4264118c3bd6634877073eea5a4b97ae9.png';
+import { Badge } from './ui/badge';
+import logoImage from '../assets/violify-logo.jpeg';
 
 interface HomeScreenProps {
   onNavigate: (screen: string) => void;
+  isGuestMode?: boolean;
+  isNewUser?: boolean;
+  userName?: string;
 }
 
-export default function HomeScreen({ onNavigate }: HomeScreenProps) {
+export default function HomeScreen({ onNavigate, isGuestMode = false, isNewUser = false, userName = 'Samarth' }: HomeScreenProps) {
+  const getWelcomeMessage = () => {
+    if (isGuestMode) {
+      return {
+        title: "Welcome, Guest! 🎵",
+        subtitle: "Explore Violify and start your musical journey"
+      };
+    }
+    if (isNewUser) {
+      return {
+        title: `Welcome to Violify, ${userName}! 🎉`,
+        subtitle: "Let's begin your journey to mastering Carnatic violin"
+      };
+    }
+    return {
+      title: `Welcome back, ${userName}! 👋`,
+      subtitle: "Let's make today count with great practice!"
+    };
+  };
+
+  const { title, subtitle } = getWelcomeMessage();
+  const showStats = !isGuestMode && !isNewUser;
+
   return (
     <div className="min-h-screen bg-white dark:bg-gray-950 pb-24 lg:pb-8">
       {/* Header with Big Welcome */}
-      <div className="bg-gradient-to-br from-orange-50 to-white dark:from-gray-900 dark:to-gray-950 px-6 pt-8 pb-16 lg:rounded-none border-b border-gray-200 dark:border-gray-800">
+      <div id="home-header" className="bg-gradient-to-br from-orange-50 to-white dark:from-gray-900 dark:to-gray-950 px-6 pt-8 pb-16 lg:rounded-none border-b border-gray-200 dark:border-gray-800">
         <div className="max-w-6xl mx-auto">
           <div className="flex items-center justify-between mb-8">
-            <img src={logoImage} alt="Violify" className="h-14 lg:hidden object-contain" style={{ mixBlendMode: 'multiply' }} />
-            <div className="flex items-center gap-2 bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-900 px-4 py-2 rounded-full">
-              <Flame className="text-[#FF901F]" size={20} />
-              <span className="text-black dark:text-white">12 Day Streak</span>
-            </div>
+            <img src={logoImage} alt="Violify" className="h-14 lg:hidden object-contain" />
+            {showStats && (
+              <div className="flex items-center gap-2 bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-900 px-4 py-2 rounded-full">
+                <Flame className="text-[#FF901F]" size={20} />
+                <span className="text-black dark:text-white">12 Day Streak</span>
+              </div>
+            )}
           </div>
-          
+
           {/* Big Welcome Message */}
           <div className="mb-6">
-            <h1 className="text-4xl lg:text-5xl mb-2 text-black dark:text-white font-bold">Welcome back, Samarth! 👋</h1>
-            <p className="text-xl text-gray-600 dark:text-gray-400">Let's make today count with great practice!</p>
+            <h1 className="text-4xl lg:text-5xl mb-2 text-black dark:text-white font-bold">{title}</h1>
+            <p className="text-xl text-gray-600 dark:text-gray-400">{subtitle}</p>
           </div>
         </div>
       </div>
 
       <div className="max-w-6xl mx-auto px-6 -mt-8">
-        {/* Practice Summary Card */}
+        {/* Practice Summary Card - Only show for returning users */}
+        {showStats && (
         <Card className="mb-6 border-gray-200 bg-gradient-to-br from-[#FF901F] to-[#FFA64D] shadow-xl">
           <CardContent className="pt-6">
             <div className="mb-4">
@@ -60,9 +89,11 @@ export default function HomeScreen({ onNavigate }: HomeScreenProps) {
             </div>
           </CardContent>
         </Card>
+        )}
 
         {/* Quick Start Practice Button */}
         <Button
+          id="practice-button"
           onClick={() => onNavigate('practice')}
           className="w-full bg-[#FF901F] hover:bg-[#E67F0C] text-white py-8 rounded-2xl shadow-xl shadow-[#FF901F]/20 mb-6 group"
         >
@@ -73,7 +104,9 @@ export default function HomeScreen({ onNavigate }: HomeScreenProps) {
               </div>
               <div className="text-left">
                 <div className="text-lg">Start Practice</div>
-                <div className="text-sm opacity-90">Continue where you left off</div>
+                {!isNewUser && !isGuestMode && (
+                  <div className="text-sm opacity-90">Continue where you left off</div>
+                )}
               </div>
             </div>
             <div className="bg-white/20 rounded-full p-2 group-hover:translate-x-1 transition-transform">
@@ -82,7 +115,85 @@ export default function HomeScreen({ onNavigate }: HomeScreenProps) {
           </div>
         </Button>
 
-        {/* Daily Goal */}
+        {/* Starter Content for New Users */}
+        {(isNewUser || isGuestMode) && (
+          <div className="mb-6">
+            <h2 className="text-black dark:text-white mb-4">Get Started with Your First Lesson</h2>
+            <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-md hover:shadow-lg transition-shadow">
+              <CardContent className="pt-6">
+                <div className="flex items-start gap-4">
+                  <div className="bg-gradient-to-br from-[#FF901F] to-[#FFA64D] rounded-xl p-4 flex-shrink-0">
+                    <Music className="text-white" size={32} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <h3 className="text-black dark:text-white mb-1">Introduction to Sa</h3>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">Learn the foundation of Carnatic music</p>
+                      </div>
+                      <Badge className="bg-green-500 text-white">Sample</Badge>
+                    </div>
+                    <div className="mt-3 mb-3">
+                      <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                        Master the first note (Sa) with proper technique and pitch recognition
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex gap-4 text-sm text-gray-600 dark:text-gray-400">
+                        <div className="flex items-center gap-1">
+                          <Clock size={16} />
+                          <span>15 min</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Target size={16} />
+                          <span>Beginner</span>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => onNavigate('lessons')}
+                        className="bg-[#FF901F] hover:bg-[#E67F0C] text-white"
+                      >
+                        Start Lesson
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Quick Tips Card */}
+            <Card className="mt-4 border-gray-200 dark:border-gray-800 bg-gradient-to-br from-orange-50 to-white dark:from-gray-900 dark:to-gray-800 shadow-sm">
+              <CardContent className="pt-6">
+                <h3 className="text-black dark:text-white mb-3 flex items-center gap-2">
+                  <TrendingUp className="text-[#FF901F]" size={20} />
+                  Quick Tips to Get Started
+                </h3>
+                <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                  <li className="flex items-start gap-2">
+                    <CheckCircle className="text-[#9ACD32] flex-shrink-0 mt-0.5" size={16} />
+                    <span>Find a quiet space where you can practice without interruptions</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle className="text-[#9ACD32] flex-shrink-0 mt-0.5" size={16} />
+                    <span>Make sure your microphone is enabled for AI feedback</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle className="text-[#9ACD32] flex-shrink-0 mt-0.5" size={16} />
+                    <span>Practice consistently - even 15 minutes daily makes a big difference!</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle className="text-[#9ACD32] flex-shrink-0 mt-0.5" size={16} />
+                    <span>Track your progress in the Analytics tab to see your improvement</span>
+                  </li>
+                </ul>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Daily Goal - Only show for returning users */}
+        {showStats && (
         <Card className="mb-6 border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
@@ -98,8 +209,10 @@ export default function HomeScreen({ onNavigate }: HomeScreenProps) {
             <p className="text-sm text-gray-600 dark:text-gray-400">5 minutes to reach your goal! 🎯</p>
           </CardContent>
         </Card>
+        )}
 
-        {/* Stats Grid */}
+        {/* Stats Grid - Only show for returning users */}
+        {showStats && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
             <CardContent className="pt-6">
@@ -157,8 +270,10 @@ export default function HomeScreen({ onNavigate }: HomeScreenProps) {
             </CardContent>
           </Card>
         </div>
+        )}
 
-        {/* Recent Lessons */}
+        {/* Recent Lessons - Only show for returning users */}
+        {showStats && (
         <div className="mb-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-black dark:text-white">Recent Lessons</h2>
@@ -202,8 +317,10 @@ export default function HomeScreen({ onNavigate }: HomeScreenProps) {
             </Card>
           </div>
         </div>
+        )}
 
-        {/* Achievements */}
+        {/* Achievements - Only show for returning users */}
+        {showStats && (
         <Card className="mb-6 border-gray-200 bg-gradient-to-br from-orange-50 to-white shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-black">
@@ -223,6 +340,7 @@ export default function HomeScreen({ onNavigate }: HomeScreenProps) {
             </div>
           </CardContent>
         </Card>
+        )}
       </div>
     </div>
   );

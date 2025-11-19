@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Home, Play, BookOpen, User, BarChart3 } from 'lucide-react';
 import OnboardingScreen from './components/OnboardingScreen';
+import LoginScreen from './components/LoginScreen';
+import SignUpScreen from './components/SignUpScreen';
 import HomeScreen from './components/HomeScreen';
 import PracticeScreen from './components/PracticeScreen';
 import LessonLibraryScreen from './components/LessonLibraryScreen';
@@ -10,17 +12,48 @@ import PerformanceReportScreen from './components/PerformanceReportScreen';
 import SettingsScreen from './components/SettingsScreen';
 import AnalyticsScreen from './components/AnalyticsScreen';
 import { DarkModeProvider } from './components/DarkModeContext';
-import logoImage from 'figma:asset/55b61fb4264118c3bd6634877073eea5a4b97ae9.png';
+import { AuthProvider, useAuth } from './components/AuthContext';
+import OnboardingTutorial from './components/OnboardingTutorial';
+import logoImage from './assets/violify-logo.jpeg';
 
-type Screen = 'onboarding' | 'home' | 'practice' | 'repetition' | 'report' | 'lessons' | 'lesson-detail' | 'settings' | 'analytics';
+type Screen = 'onboarding' | 'login' | 'signup' | 'home' | 'practice' | 'repetition' | 'report' | 'lessons' | 'lesson-detail' | 'settings' | 'analytics';
 
-export default function App() {
+function AppContent() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('onboarding');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const { isAuthenticated, loading, user } = useAuth();
   const [selectedLessonId, setSelectedLessonId] = useState<number | undefined>(undefined);
+  const [isGuestMode, setIsGuestMode] = useState(false);
+  const [isNewUser, setIsNewUser] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+
+  useEffect(() => {
+    // If user is authenticated, navigate to home
+    if (isAuthenticated && !loading) {
+      setCurrentScreen('home');
+      setIsGuestMode(false); // Reset guest mode if user authenticates
+      // Check if user is new by checking if they have any stored data
+      // For now, we'll consider them new on first sign-in
+      // In production, you'd check against a backend
+      const hasSeenApp = localStorage.getItem(`user_${user?.uid}_seen`);
+      const isNew = !hasSeenApp;
+      setIsNewUser(isNew);
+
+      // Show tutorial for new users
+      if (isNew) {
+        setShowTutorial(true);
+      }
+
+      if (!hasSeenApp && user?.uid) {
+        localStorage.setItem(`user_${user.uid}_seen`, 'true');
+      }
+    } else if (!isAuthenticated && !loading && !isGuestMode) {
+      setCurrentScreen('onboarding');
+    }
+  }, [isAuthenticated, loading, isGuestMode, user]);
 
   const handleLogin = () => {
-    setIsAuthenticated(true);
+    // This is called when user continues as guest
+    setIsGuestMode(true);
     setCurrentScreen('home');
   };
   
@@ -29,14 +62,43 @@ export default function App() {
     setCurrentScreen('lesson-detail');
   };
 
+  // Show loading state while checking auth
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#FF901F] mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   const renderScreen = () => {
-    if (!isAuthenticated) {
-      return <OnboardingScreen onLogin={handleLogin} />;
+    // Show auth-related screens only if not authenticated AND not in guest mode
+    if (!isAuthenticated && !isGuestMode) {
+      if (currentScreen === 'login') {
+        return <LoginScreen onBack={() => setCurrentScreen('onboarding')} onSignUp={() => setCurrentScreen('signup')} />;
+      }
+      if (currentScreen === 'signup') {
+        return <SignUpScreen onBack={() => setCurrentScreen('onboarding')} onLogin={() => setCurrentScreen('login')} />;
+      }
+      return <OnboardingScreen
+        onLogin={handleLogin}
+        onShowLogin={() => setCurrentScreen('login')}
+        onShowSignUp={() => setCurrentScreen('signup')}
+      />;
     }
 
+    // If authenticated OR in guest mode, show the main app screens
     switch (currentScreen) {
       case 'home':
-        return <HomeScreen onNavigate={setCurrentScreen} />;
+        return <HomeScreen
+          onNavigate={setCurrentScreen}
+          isGuestMode={isGuestMode}
+          isNewUser={isNewUser}
+          userName={user?.displayName?.split(' ')[0] || 'there'}
+        />;
       case 'practice':
         return <PracticeScreen onNavigate={setCurrentScreen} selectedLessonId={selectedLessonId} />;
       case 'repetition':
@@ -57,22 +119,25 @@ export default function App() {
   };
 
   const navItems = [
-    { id: 'home' as Screen, icon: Home, label: 'Home' },
-    { id: 'practice' as Screen, icon: Play, label: 'Practice' },
-    { id: 'lessons' as Screen, icon: BookOpen, label: 'Lessons' },
-    { id: 'analytics' as Screen, icon: BarChart3, label: 'Analytics' },
-    { id: 'settings' as Screen, icon: User, label: 'Profile' },
+    { id: 'home' as Screen, icon: Home, label: 'Home', elementId: 'home-tab' },
+    { id: 'practice' as Screen, icon: Play, label: 'Practice', elementId: 'practice-tab' },
+    { id: 'lessons' as Screen, icon: BookOpen, label: 'Lessons', elementId: 'lessons-tab' },
+    { id: 'analytics' as Screen, icon: BarChart3, label: 'Analytics', elementId: 'analytics-tab' },
+    { id: 'settings' as Screen, icon: User, label: 'Profile', elementId: 'settings-tab' },
   ];
 
+  const handleTutorialComplete = () => {
+    setShowTutorial(false);
+  };
+
   return (
-    <DarkModeProvider>
-      <div className="min-h-screen bg-background">
-        {isAuthenticated ? (
+    <div className="min-h-screen bg-background">
+      {isAuthenticated || isGuestMode ? (
           <div className="flex min-h-screen">
           {/* Desktop Sidebar */}
           <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-card border-r border-border">
             <div className="flex items-center gap-3 px-4 py-4 pt-6">
-              <img src={logoImage} alt="Violify Logo" className="h-24 w-auto object-contain" style={{ mixBlendMode: 'multiply' }} />
+              <img src={logoImage} alt="Violify Logo" className="h-24 w-auto object-contain" />
             </div>
             
             <nav className="flex-1 px-4 py-2">
@@ -86,6 +151,7 @@ export default function App() {
                   return (
                     <button
                       key={item.id}
+                      id={item.elementId}
                       onClick={() => setCurrentScreen(item.id)}
                       className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
                         isActive
@@ -129,6 +195,7 @@ export default function App() {
                   return (
                     <button
                       key={item.id}
+                      id={item.elementId}
                       onClick={() => setCurrentScreen(item.id)}
                       className={`flex flex-col items-center gap-1 px-2 py-1 rounded-lg transition-colors ${
                         isActive ? 'text-[#FF901F]' : 'text-muted-foreground'
@@ -142,11 +209,25 @@ export default function App() {
               </div>
             </div>
           </nav>
+
+          {/* Onboarding Tutorial */}
+          {showTutorial && isNewUser && (
+            <OnboardingTutorial onComplete={handleTutorialComplete} />
+          )}
           </div>
-        ) : (
-          renderScreen()
-        )}
-      </div>
+      ) : (
+        renderScreen()
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <DarkModeProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </DarkModeProvider>
   );
 }
