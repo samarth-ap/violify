@@ -75,88 +75,8 @@ export default function LessonLibraryScreen({
     difficulty: "",
   });
 
-  const lessons: Lesson[] = [
-    {
-      id: 1,
-      title: "Varnam in Kalyani",
-      description:
-        "Master the fundamental varnam with focus on gamakas",
-      status: "in-progress",
-      note: "Focus on the higher octave transitions",
-      category: "Varnam",
-      ragam: "Kalyani",
-      thalam: "Adi",
-      difficulty: "Intermediate",
-      createdDate: "2025-10-15",
-      progress: 75,
-    },
-    {
-      id: 2,
-      title: "Alapana Practice",
-      description: "Explore raga Bhairavi through alapana",
-      status: "in-progress",
-      note: "Work on slower phrases for better expression",
-      category: "Alapana",
-      ragam: "Bhairavi",
-      thalam: "N/A",
-      difficulty: "Advanced",
-      createdDate: "2025-10-18",
-      progress: 40,
-    },
-    {
-      id: 3,
-      title: "Kritis - Vatapi Ganapatim",
-      description:
-        "Learn this popular composition in Hamsadhwani",
-      status: "completed",
-      note: "Excellent! Ready to move to the next kriti",
-      category: "Kriti",
-      ragam: "Hamsadhwani",
-      thalam: "Adi",
-      difficulty: "Intermediate",
-      createdDate: "2025-10-10",
-      progress: 100,
-    },
-    {
-      id: 4,
-      title: "Bow Technique Exercises",
-      description: "Daily bow control and stability drills",
-      status: "in-progress",
-      note: "Start with slow bowing exercises",
-      category: "Technique",
-      ragam: "N/A",
-      thalam: "N/A",
-      difficulty: "Beginner",
-      createdDate: "2025-10-20",
-      progress: 33,
-    },
-    {
-      id: 5,
-      title: "Thillana in Desh",
-      description: "Fast-paced thillana for rhythm practice",
-      status: "in-progress",
-      note: "Challenge yourself with this complex rhythm",
-      category: "Thillana",
-      ragam: "Desh",
-      thalam: "Adi",
-      difficulty: "Advanced",
-      createdDate: "2025-10-22",
-      progress: 20,
-    },
-    {
-      id: 6,
-      title: "Raga Mohanam Scales",
-      description: "Practice all three octaves",
-      status: "completed",
-      note: "Perfect! Great control across octaves",
-      category: "Scales",
-      ragam: "Mohanam",
-      thalam: "N/A",
-      difficulty: "Beginner",
-      createdDate: "2025-10-08",
-      progress: 100,
-    },
-  ];
+  // TODO: Fetch real lessons from Firestore when implemented
+  const lessons: Lesson[] = [];
 
   const filteredLessons = lessons
     .filter((lesson) => {
@@ -254,16 +174,17 @@ export default function LessonLibraryScreen({
       {/* Header */}
       <div className="bg-gradient-to-br from-orange-50 to-white dark:from-gray-900 dark:to-gray-950 border-b border-gray-200 dark:border-gray-800 px-6 pt-8 pb-8">
         <div className="max-w-6xl mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-black dark:text-white font-bold">
-              Lesson Library
-            </h1>
+          <div className="flex items-start justify-between mb-6">
+            <div className="mb-4">
+              <h1 className="text-3xl text-black dark:text-white font-bold">Lesson Library</h1>
+              <p className="text-gray-600 dark:text-gray-400 mt-2">Organize and track your violin practice repertoire</p>
+            </div>
             <Dialog
               open={isAddLessonOpen}
               onOpenChange={setIsAddLessonOpen}
             >
               <DialogTrigger asChild>
-                <Button className="bg-[#FF901F] hover:bg-[#E67F0C] text-white">
+                <Button className="bg-[#FF901F] hover:bg-[#E67F0C] text-white flex-shrink-0">
                   <Plus size={20} className="mr-2" />
                   Add Lesson
                 </Button>
@@ -575,12 +496,26 @@ export default function LessonLibraryScreen({
 
       <div className="max-w-6xl mx-auto px-6 py-6">
         {filteredLessons.length === 0 ? (
-          <div className="text-center py-12">
-            <Music
-              className="mx-auto text-gray-300 dark:text-gray-700 mb-4"
-              size={64}
-            />
-            <p className="text-gray-600 dark:text-gray-400">No lessons found</p>
+          <div className="text-center py-12 max-w-md mx-auto">
+            <div className="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-950/30 dark:to-orange-900/20 rounded-full w-24 h-24 mx-auto mb-6 flex items-center justify-center">
+              <Music
+                className="text-[#FF901F]"
+                size={48}
+              />
+            </div>
+            <h3 className="text-2xl font-bold text-black dark:text-white mb-3">
+              Start Your Journey! 🎻
+            </h3>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              Create your first lesson to begin tracking your progress. Add notation, recordings, and notes to organize your practice effectively.
+            </p>
+            <Button
+              onClick={() => setIsAddLessonOpen(true)}
+              className="bg-[#FF901F] hover:bg-[#E67F0C] text-white px-8 py-6 text-lg"
+            >
+              <Plus size={24} className="mr-2" />
+              Create Your First Lesson
+            </Button>
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">

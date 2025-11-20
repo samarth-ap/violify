@@ -43,13 +43,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await signInWithPopup(auth, googleProvider);
 
       // Check if user profile exists, if not create one
-      const userExists = await checkIfUserExists(result.user.uid);
-      if (!userExists) {
-        await createUserProfile(result.user.uid, {
-          displayName: result.user.displayName || '',
-          email: result.user.email || '',
-          subscription: 'free'
-        });
+      // Wrapped in try-catch so auth still works even if Firestore isn't enabled
+      try {
+        const userExists = await checkIfUserExists(result.user.uid);
+        if (!userExists) {
+          await createUserProfile(result.user.uid, {
+            displayName: result.user.displayName || '',
+            email: result.user.email || '',
+            subscription: 'free'
+          });
+        }
+      } catch (firestoreError) {
+        console.warn('Firestore not enabled yet. Enable it in Firebase Console:', firestoreError);
       }
     } catch (error: any) {
       console.error('Error signing in with Google:', error);
@@ -65,13 +70,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await signInWithPopup(auth, appleProvider);
 
       // Check if user profile exists, if not create one
-      const userExists = await checkIfUserExists(result.user.uid);
-      if (!userExists) {
-        await createUserProfile(result.user.uid, {
-          displayName: result.user.displayName || '',
-          email: result.user.email || '',
-          subscription: 'free'
-        });
+      // Wrapped in try-catch so auth still works even if Firestore isn't enabled
+      try {
+        const userExists = await checkIfUserExists(result.user.uid);
+        if (!userExists) {
+          await createUserProfile(result.user.uid, {
+            displayName: result.user.displayName || '',
+            email: result.user.email || '',
+            subscription: 'free'
+          });
+        }
+      } catch (firestoreError) {
+        console.warn('Firestore not enabled yet. Enable it in Firebase Console:', firestoreError);
       }
     } catch (error: any) {
       console.error('Error signing in with Apple:', error);
@@ -93,11 +103,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
 
         // Create user profile in Firestore
-        await createUserProfile(userCredential.user.uid, {
-          displayName: username,
-          email: email,
-          subscription: 'free'
-        });
+        // Wrapped in try-catch so auth still works even if Firestore isn't enabled
+        try {
+          await createUserProfile(userCredential.user.uid, {
+            displayName: username,
+            email: email,
+            subscription: 'free'
+          });
+        } catch (firestoreError) {
+          console.warn('Firestore not enabled yet. Enable it in Firebase Console:', firestoreError);
+        }
       }
     } catch (error: any) {
       console.error('Error signing up with email:', error);

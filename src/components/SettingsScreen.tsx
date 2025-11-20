@@ -18,9 +18,11 @@ import logoImage from "../assets/violify-logo.jpeg";
 
 interface SettingsScreenProps {
   onNavigate: (screen: string) => void;
+  isGuestMode?: boolean;
+  onGuestLogout?: () => void;
 }
 
-export default function SettingsScreen({ onNavigate }: SettingsScreenProps) {
+export default function SettingsScreen({ onNavigate, isGuestMode = false, onGuestLogout }: SettingsScreenProps) {
   const { isDarkMode, toggleDarkMode } = useDarkMode();
   const { user, signOut } = useAuth();
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -73,12 +75,17 @@ export default function SettingsScreen({ onNavigate }: SettingsScreenProps) {
       }
 
       // Save all profile data to Firestore
-      await updateUserProfile(user.uid, {
-        displayName: fullName,
-        email: email,
-        phone: phone,
-        bio: bio
-      });
+      // Wrapped in try-catch so profile updates still work even if Firestore isn't enabled
+      try {
+        await updateUserProfile(user.uid, {
+          displayName: fullName,
+          email: email,
+          phone: phone,
+          bio: bio
+        });
+      } catch (firestoreError) {
+        console.warn('Firestore not enabled yet. Profile saved to Firebase Auth only:', firestoreError);
+      }
 
       toast.success('Profile updated successfully!');
       setIsEditDialogOpen(false);
@@ -100,6 +107,14 @@ export default function SettingsScreen({ onNavigate }: SettingsScreenProps) {
   };
 
   const handleSignOut = async () => {
+    // Handle guest mode logout differently
+    if (isGuestMode && onGuestLogout) {
+      toast.success('Signed out successfully');
+      onGuestLogout();
+      return;
+    }
+
+    // Handle regular authenticated user logout
     try {
       await signOut();
       toast.success('Signed out successfully');
@@ -112,12 +127,18 @@ export default function SettingsScreen({ onNavigate }: SettingsScreenProps) {
   return (
     <div className="min-h-screen bg-background pb-24 lg:pb-8">
       {/* Header */}
-      <div className="bg-gradient-to-br from-orange-50 to-background dark:from-orange-950/20 dark:to-background border-b border-border px-6 pt-8 pb-12">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="mb-6 text-foreground font-bold">Profile & Settings</h1>
-          
-          {/* Profile Card */}
-          <Card className="bg-card border border-border">
+      <div className="bg-gradient-to-br from-orange-50 to-background dark:from-orange-950/20 dark:to-background border-b border-border px-6 pt-8 pb-6">
+        <div className="max-w-6xl mx-auto">
+          <div>
+            <h1 className="text-3xl text-foreground font-bold">Profile & Settings</h1>
+            <p className="text-muted-foreground mt-2">Manage your account, preferences, and subscription</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-6xl mx-auto px-6 py-6">
+        {/* Profile Card */}
+        <Card className="bg-card border border-border mb-6">
             <CardContent className="pt-6">
               <div className="flex items-start gap-4">
                 <Avatar className="w-20 h-20 border-4 border-[#FF901F]">
@@ -233,10 +254,8 @@ export default function SettingsScreen({ onNavigate }: SettingsScreenProps) {
               </div>
             </CardContent>
           </Card>
-        </div>
-      </div>
 
-      <div className="max-w-4xl mx-auto px-6 -mt-6 lg:grid lg:grid-cols-2 lg:gap-6">
+        <div className="lg:grid lg:grid-cols-2 lg:gap-6">
         <div className="lg:col-span-1 space-y-6 mb-6 lg:mb-0">
         {/* Subscription */}
         <Card className="border-0 shadow-xl overflow-hidden bg-gradient-to-br from-[#FF901F] via-[#FFA64D] to-[#FFB366] relative">
@@ -440,6 +459,7 @@ export default function SettingsScreen({ onNavigate }: SettingsScreenProps) {
             <span>Log Out</span>
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

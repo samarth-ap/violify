@@ -1,4 +1,5 @@
-import { Play, Flame, Target, Clock, TrendingUp, Music, Award, ChevronRight, CheckCircle } from 'lucide-react';
+import { useState } from 'react';
+import { Play, Flame, Target, Clock, TrendingUp, Music, Award, ChevronRight, CheckCircle, Plus, Minus } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Progress } from './ui/progress';
@@ -13,6 +14,19 @@ interface HomeScreenProps {
 }
 
 export default function HomeScreen({ onNavigate, isGuestMode = false, isNewUser = false, userName = 'Samarth' }: HomeScreenProps) {
+  const [dailyGoal, setDailyGoal] = useState(30);
+  const [goalSet, setGoalSet] = useState(() => {
+    // Check if goal has been set before
+    return localStorage.getItem('dailyGoalSet') === 'true';
+  });
+
+  const handleSetGoal = () => {
+    // Save goal to localStorage
+    localStorage.setItem('dailyGoal', dailyGoal.toString());
+    localStorage.setItem('dailyGoalSet', 'true');
+    setGoalSet(true);
+  };
+
   const getWelcomeMessage = () => {
     if (isGuestMode) {
       return {
@@ -42,12 +56,7 @@ export default function HomeScreen({ onNavigate, isGuestMode = false, isNewUser 
         <div className="max-w-6xl mx-auto">
           <div className="flex items-center justify-between mb-8">
             <img src={logoImage} alt="Violify" className="h-14 lg:hidden object-contain" />
-            {showStats && (
-              <div className="flex items-center gap-2 bg-white dark:bg-gray-800 border border-orange-200 dark:border-orange-900 px-4 py-2 rounded-full">
-                <Flame className="text-[#FF901F]" size={20} />
-                <span className="text-black dark:text-white">12 Day Streak</span>
-              </div>
-            )}
+            {/* Streak badge removed - will be added back when real data is available */}
           </div>
 
           {/* Big Welcome Message */}
@@ -59,37 +68,7 @@ export default function HomeScreen({ onNavigate, isGuestMode = false, isNewUser 
       </div>
 
       <div className="max-w-6xl mx-auto px-6 -mt-8">
-        {/* Practice Summary Card - Only show for returning users */}
-        {showStats && (
-        <Card className="mb-6 border-gray-200 bg-gradient-to-br from-[#FF901F] to-[#FFA64D] shadow-xl">
-          <CardContent className="pt-6">
-            <div className="mb-4">
-              <h3 className="text-white"><span className="font-bold">This Week's Practice Summary</span></h3>
-              <p className="text-white/80 text-sm">Check Analytics tab for detailed insights</p>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Clock className="text-white" size={20} />
-                  <span className="text-white/80 text-sm">Minutes Practiced</span>
-                </div>
-                <div className="text-3xl text-white">425</div>
-                <div className="text-white/70 text-sm mt-1">+15% from last week</div>
-              </div>
-              
-              <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle className="text-white" size={20} />
-                  <span className="text-white/80 text-sm">Mistakes Fixed</span>
-                </div>
-                <div className="text-3xl text-white">54</div>
-                <div className="text-white/70 text-sm mt-1">Great improvement!</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        )}
+        {/* Practice Summary Card removed - will show real data from Firestore analytics */}
 
         {/* Quick Start Practice Button */}
         <Button
@@ -104,9 +83,6 @@ export default function HomeScreen({ onNavigate, isGuestMode = false, isNewUser 
               </div>
               <div className="text-left">
                 <div className="text-lg">Start Practice</div>
-                {!isNewUser && !isGuestMode && (
-                  <div className="text-sm opacity-90">Continue where you left off</div>
-                )}
               </div>
             </div>
             <div className="bg-white/20 rounded-full p-2 group-hover:translate-x-1 transition-transform">
@@ -115,232 +91,147 @@ export default function HomeScreen({ onNavigate, isGuestMode = false, isNewUser 
           </div>
         </Button>
 
-        {/* Starter Content for New Users */}
+        {/* Daily Goal Setup for New Users */}
+        {(isNewUser || isGuestMode) && !goalSet && (
+          <>
+            <Card className="mb-6 border-gray-200 dark:border-gray-800 bg-gradient-to-br from-orange-50 to-white dark:from-orange-900/10 dark:to-gray-900 shadow-md">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-black dark:text-white">
+                  <Target className="text-[#FF901F]" size={24} />
+                  <span className="font-bold">Set Your Daily Practice Goal</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-gray-600 dark:text-gray-400 mb-6">
+                  Start your journey by setting a realistic daily practice goal. Consistency is key to mastering the violin!
+                </p>
+
+                <div className="flex items-center justify-center gap-4 mb-6">
+                  <Button
+                    onClick={() => setDailyGoal(Math.max(5, dailyGoal - 5))}
+                    className="h-12 w-12 rounded-full bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-[#FF901F] border-2 border-gray-200 dark:border-gray-700 hover:border-[#FF901F] p-0 flex items-center justify-center shrink-0"
+                  >
+                    <Minus size={20} />
+                  </Button>
+
+                  <div className="flex items-center bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-950/30 dark:to-orange-900/20 border-2 border-[#FF901F] rounded-2xl px-6 py-4 justify-center">
+                    <input
+                      type="number"
+                      value={dailyGoal}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 0;
+                        setDailyGoal(Math.max(5, Math.min(180, val)));
+                      }}
+                      className="text-5xl font-bold text-[#FF901F] bg-transparent border-none outline-none text-center w-24 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      min="5"
+                      max="180"
+                    />
+                    <span className="text-lg font-medium text-gray-700 dark:text-gray-300">min</span>
+                  </div>
+
+                  <Button
+                    onClick={() => setDailyGoal(Math.min(180, dailyGoal + 5))}
+                    className="h-12 w-12 rounded-full bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-[#FF901F] border-2 border-gray-200 dark:border-gray-700 hover:border-[#FF901F] p-0 flex items-center justify-center shrink-0"
+                  >
+                    <Plus size={20} />
+                  </Button>
+                </div>
+
+                <div className="flex justify-center gap-2 mb-6">
+                  <Badge className="bg-orange-100 dark:bg-orange-950/30 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800 text-xs px-3 py-1">
+                    Recommended: 30 min/day
+                  </Badge>
+                </div>
+
+                <div className="flex justify-center mb-6">
+                  <Button
+                    onClick={handleSetGoal}
+                    className="bg-[#FF901F] hover:bg-[#E67F0C] text-white py-3 px-20 text-base font-semibold"
+                  >
+                    Set Goal
+                  </Button>
+                </div>
+
+                <p className="text-xs text-gray-500 dark:text-gray-500 text-center">
+                  Don't worry, you can change this anytime in Settings
+                </p>
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {/* Empty Stats for New Users */}
         {(isNewUser || isGuestMode) && (
-          <div className="mb-6">
-            <h2 className="text-black dark:text-white mb-4">Get Started with Your First Lesson</h2>
-            <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-md hover:shadow-lg transition-shadow">
-              <CardContent className="pt-6">
-                <div className="flex items-start gap-4">
-                  <div className="bg-gradient-to-br from-[#FF901F] to-[#FFA64D] rounded-xl p-4 flex-shrink-0">
-                    <Music className="text-white" size={32} />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <h3 className="text-black dark:text-white mb-1">Introduction to Sa</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">Learn the foundation of Carnatic music</p>
-                      </div>
-                      <Badge className="bg-green-500 text-white">Sample</Badge>
+          <>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="bg-orange-50 dark:bg-orange-950/20 rounded-full p-2">
+                      <Clock className="text-[#FF901F]" size={20} />
                     </div>
-                    <div className="mt-3 mb-3">
-                      <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                        Master the first note (Sa) with proper technique and pitch recognition
-                      </p>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex gap-4 text-sm text-gray-600 dark:text-gray-400">
-                        <div className="flex items-center gap-1">
-                          <Clock size={16} />
-                          <span>15 min</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Target size={16} />
-                          <span>Beginner</span>
-                        </div>
-                      </div>
-                      <Button
-                        size="sm"
-                        onClick={() => onNavigate('lessons')}
-                        className="bg-[#FF901F] hover:bg-[#E67F0C] text-white"
-                      >
-                        Start Lesson
-                      </Button>
+                    <div>
+                      <div className="text-2xl text-black dark:text-white">0h</div>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">Today</div>
                     </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 italic">Start practicing to track your time!</p>
+                </CardContent>
+              </Card>
 
-            {/* Quick Tips Card */}
-            <Card className="mt-4 border-gray-200 dark:border-gray-800 bg-gradient-to-br from-orange-50 to-white dark:from-gray-900 dark:to-gray-800 shadow-sm">
-              <CardContent className="pt-6">
-                <h3 className="text-black dark:text-white mb-3 flex items-center gap-2">
-                  <TrendingUp className="text-[#FF901F]" size={20} />
-                  Quick Tips to Get Started
-                </h3>
-                <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-                  <li className="flex items-start gap-2">
-                    <CheckCircle className="text-[#9ACD32] flex-shrink-0 mt-0.5" size={16} />
-                    <span>Find a quiet space where you can practice without interruptions</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <CheckCircle className="text-[#9ACD32] flex-shrink-0 mt-0.5" size={16} />
-                    <span>Make sure your microphone is enabled for AI feedback</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <CheckCircle className="text-[#9ACD32] flex-shrink-0 mt-0.5" size={16} />
-                    <span>Practice consistently - even 15 minutes daily makes a big difference!</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <CheckCircle className="text-[#9ACD32] flex-shrink-0 mt-0.5" size={16} />
-                    <span>Track your progress in the Analytics tab to see your improvement</span>
-                  </li>
-                </ul>
-              </CardContent>
-            </Card>
-          </div>
-        )}
+              <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="bg-orange-50 dark:bg-orange-950/20 rounded-full p-2">
+                      <Flame className="text-[#FF901F]" size={20} />
+                    </div>
+                    <div>
+                      <div className="text-2xl text-black dark:text-white">0</div>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">Day Streak</div>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 italic">Build your streak by practicing daily!</p>
+                </CardContent>
+              </Card>
 
-        {/* Daily Goal - Only show for returning users */}
-        {showStats && (
-        <Card className="mb-6 border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-black dark:text-white">
-                <Target className="text-[#FF901F]" size={20} />
-                <span className="font-bold">Daily Goal</span>
-              </CardTitle>
-              <span className="text-sm text-gray-600 dark:text-gray-400">25/30 min</span>
+              <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="bg-orange-50 dark:bg-orange-950/20 rounded-full p-2">
+                      <TrendingUp className="text-[#FF901F]" size={20} />
+                    </div>
+                    <div>
+                      <div className="text-2xl text-black dark:text-white">0%</div>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">Progress</div>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 italic">Your progress will show here!</p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="bg-orange-50 dark:bg-orange-950/20 rounded-full p-2">
+                      <Music className="text-[#FF901F]" size={20} />
+                    </div>
+                    <div>
+                      <div className="text-2xl text-black dark:text-white">0</div>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">Lessons</div>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 italic">Explore lessons to get started!</p>
+                </CardContent>
+              </Card>
             </div>
-          </CardHeader>
-          <CardContent>
-            <Progress value={83} className="h-3 mb-2" />
-            <p className="text-sm text-gray-600 dark:text-gray-400">5 minutes to reach your goal! 🎯</p>
-          </CardContent>
-        </Card>
+          </>
         )}
 
-        {/* Stats Grid - Only show for returning users */}
-        {showStats && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="bg-orange-50 dark:bg-orange-950/20 rounded-full p-2">
-                  <Clock className="text-[#FF901F]" size={20} />
-                </div>
-                <div>
-                  <div className="text-2xl text-black dark:text-white">45m</div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Today</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+        {/* Stats and analytics removed - will show real data from Firestore once user starts practicing */}
 
-          <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="bg-orange-50 dark:bg-orange-950/20 rounded-full p-2">
-                  <TrendingUp className="text-[#FF901F]" size={20} />
-                </div>
-                <div>
-                  <div className="text-2xl text-black dark:text-white">89%</div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Accuracy</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+        {/* Recent Lessons removed - will show real data from Firestore when available */}
 
-          <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm lg:block hidden">
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="bg-orange-50 dark:bg-orange-950/20 rounded-full p-2">
-                  <Award className="text-[#FF901F]" size={20} />
-                </div>
-                <div>
-                  <div className="text-2xl text-black dark:text-white">7</div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Achievements</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm lg:block hidden">
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="bg-orange-50 dark:bg-orange-950/20 rounded-full p-2">
-                  <Music className="text-[#FF901F]" size={20} />
-                </div>
-                <div>
-                  <div className="text-2xl text-black dark:text-white">12</div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">Lessons</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-        )}
-
-        {/* Recent Lessons - Only show for returning users */}
-        {showStats && (
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-black dark:text-white">Recent Lessons</h2>
-            <button
-              onClick={() => onNavigate('lessons')}
-              className="text-[#FF901F] text-sm hover:text-[#E67F0C]"
-            >
-              View All
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm hover:shadow-md hover:border-orange-200 dark:hover:border-orange-900 transition-all cursor-pointer">
-              <CardContent className="pt-6">
-                <div className="flex items-start gap-4">
-                  <div className="bg-[#FF901F] rounded-xl p-3 flex-shrink-0">
-                    <Music className="text-white" size={24} />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="mb-1 text-black dark:text-white">Varnam in Kalyani</h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">15/20 repetitions completed</p>
-                    <Progress value={75} className="h-2" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm hover:shadow-md hover:border-orange-200 dark:hover:border-orange-900 transition-all cursor-pointer">
-              <CardContent className="pt-6">
-                <div className="flex items-start gap-4">
-                  <div className="bg-gradient-to-br from-[#FF901F] to-[#FFA64D] rounded-xl p-3 flex-shrink-0">
-                    <Music className="text-white" size={24} />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="mb-1 text-black dark:text-white">Alapana Practice</h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">8/10 repetitions completed</p>
-                    <Progress value={80} className="h-2" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-        )}
-
-        {/* Achievements - Only show for returning users */}
-        {showStats && (
-        <Card className="mb-6 border-gray-200 bg-gradient-to-br from-orange-50 to-white shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-black">
-              <Award className="text-[#FF901F]" size={20} />
-              Recent Achievement
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-4">
-              <div className="bg-[#FF901F] rounded-full p-4">
-                <Flame className="text-white" size={32} />
-              </div>
-              <div>
-                <h3 className="text-black mb-1">Week Warrior</h3>
-                <p className="text-sm text-gray-600">Practiced 7 days in a row!</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        )}
+        {/* Achievements removed - will show real data from Firestore when available */}
       </div>
     </div>
   );

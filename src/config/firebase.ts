@@ -1,22 +1,28 @@
 import { initializeApp } from "firebase/app";
-import { 
+import { getAnalytics } from "firebase/analytics";
+import {
   getAuth,
   GoogleAuthProvider,
   OAuthProvider
 } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
-// Your actual config here:
+// Your web app's Firebase configuration
+// IMPORTANT: Replace these with your actual Firebase config values from Firebase Console
 const firebaseConfig = {
-  apiKey: "...",
-  authDomain: "...",
-  projectId: "...",
-  storageBucket: "...",
-  messagingSenderId: "...",
-  appId: "..."
+  apiKey: "AIzaSyDzPfZixWtWaNAqR8k4XoPbVGqK2TTtl7M",
+  authDomain: "violify.firebaseapp.com",
+  projectId: "violify",
+  storageBucket: "violify.firebasestorage.app",
+  messagingSenderId: "471620250066",
+  appId: "1:471620250066:web:56ace640bee8ff7a97000b",
+  measurementId: "G-HLTYFGK0BX"
 };
 
 const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
 export const auth = getAuth(app);
+export const db = getFirestore(app);
 
 // Google Auth Provider
 export const googleProvider = new GoogleAuthProvider();

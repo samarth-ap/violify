@@ -55,8 +55,17 @@ function AppContent() {
     // This is called when user continues as guest
     setIsGuestMode(true);
     setCurrentScreen('home');
+    // Show tutorial for guest mode
+    setShowTutorial(true);
   };
-  
+
+  const handleGuestLogout = () => {
+    // Handle logout for guest mode
+    setIsGuestMode(false);
+    setCurrentScreen('onboarding');
+    setShowTutorial(false);
+  };
+
   const handleNavigateToLesson = (lessonId: number) => {
     setSelectedLessonId(lessonId);
     setCurrentScreen('lesson-detail');
@@ -110,7 +119,11 @@ function AppContent() {
       case 'lesson-detail':
         return <LessonDetailScreen onNavigate={setCurrentScreen} lessonId={selectedLessonId} />;
       case 'settings':
-        return <SettingsScreen onNavigate={setCurrentScreen} />;
+        return <SettingsScreen
+          onNavigate={setCurrentScreen}
+          isGuestMode={isGuestMode}
+          onGuestLogout={handleGuestLogout}
+        />;
       case 'analytics':
         return <AnalyticsScreen onNavigate={setCurrentScreen} />;
       default:
@@ -211,7 +224,7 @@ function AppContent() {
           </nav>
 
           {/* Onboarding Tutorial */}
-          {showTutorial && isNewUser && (
+          {showTutorial && (isNewUser || isGuestMode) && (
             <OnboardingTutorial onComplete={handleTutorialComplete} />
           )}
           </div>

@@ -76,7 +76,11 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
   const [tunerActive, setTunerActive] = useState(false);
   const [currentNote, setCurrentNote] = useState('C');
   const [tuning, setTuning] = useState(0); // -50 to 50 cents
-  
+
+  // Shruti (Drone) state
+  const [shrutiActive, setShrutiActive] = useState(false);
+  const [shrutiPitch, setShrutiPitch] = useState('C');
+
   // Recording state
   const [studentRecording, setStudentRecording] = useState<string | null>(null);
   const [teacherRecording, setTeacherRecording] = useState<string | null>(null);
@@ -112,14 +116,8 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
   ]);
   
   // Available lessons for selection
-  const lessons = [
-    { id: 1, title: 'Varnam in Kalyani' },
-    { id: 2, title: 'Alapana Practice' },
-    { id: 3, title: 'Kritis - Vatapi Ganapatim' },
-    { id: 4, title: 'Bow Technique Exercises' },
-    { id: 5, title: 'Thillana in Desh' },
-    { id: 6, title: 'Raga Mohanam Scales' },
-  ];
+  // TODO: Fetch real lessons from Firestore when user creates them
+  const lessons: { id: number; title: string; }[] = [];
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -269,15 +267,19 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
   return (
     <div className="min-h-screen bg-white pb-24 lg:pb-8 relative">
       {/* Header */}
-      <div className="bg-gradient-to-br from-orange-50 to-white border-b border-gray-200 px-6 pt-8 pb-4">
+      <div className="bg-gradient-to-br from-orange-50 to-white border-b border-gray-200 px-6 pt-8 pb-6">
         <div className="max-w-6xl mx-auto">
+          <div>
+            <h1 className="text-3xl text-black font-bold">Practice</h1>
+            <p className="text-gray-600 mt-2">Record your session, track repetitions, and get AI-powered feedback</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-6xl mx-auto px-6 py-6">
+        {/* Session Info */}
+        <div className="mb-6 bg-white rounded-lg border border-gray-200 p-4">
           <div className="flex items-center justify-between mb-4">
-            <button
-              onClick={() => onNavigate('home')}
-              className="p-2 hover:bg-gray-100 rounded-full transition-colors lg:hidden"
-            >
-              <ArrowLeft size={24} className="text-black" />
-            </button>
             <div className="flex-1">
               {isEditingTitle ? (
                 <div className="flex items-center gap-2">
@@ -297,21 +299,21 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
-                  <h1 className="text-black font-bold">{sessionTitle}</h1>
+                  <h2 className="text-lg text-black font-semibold">{sessionTitle}</h2>
                   <button
                     onClick={() => setIsEditingTitle(true)}
-                    className="p-1 hover:bg-gray-100 rounded transition-colors hidden lg:block"
+                    className="p-1 hover:bg-gray-100 rounded transition-colors"
                   >
                     <Edit2 size={16} className="text-gray-600" />
                   </button>
                 </div>
               )}
             </div>
-            <div className="text-black bg-white border border-gray-200 px-4 py-2 rounded-full">
+            <div className="text-black bg-orange-50 border border-orange-200 px-4 py-2 rounded-full font-semibold">
               {formatTime(timer)}
             </div>
           </div>
-          
+
           {/* Lesson Selection */}
           <div className="flex items-center gap-3">
             <BookOpen className="text-[#FF901F]" size={20} />
@@ -320,18 +322,21 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
                 <SelectValue placeholder="Select a lesson (optional)" />
               </SelectTrigger>
               <SelectContent>
-                {lessons.map(lesson => (
-                  <SelectItem key={lesson.id} value={lesson.id.toString()}>
-                    {lesson.title}
+                {lessons.length === 0 ? (
+                  <SelectItem value="no-lessons" disabled>
+                    No lessons yet - Create one in Lesson Library
                   </SelectItem>
-                ))}
+                ) : (
+                  lessons.map(lesson => (
+                    <SelectItem key={lesson.id} value={lesson.id.toString()}>
+                      {lesson.title}
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
           </div>
         </div>
-      </div>
-
-      <div className="max-w-6xl mx-auto px-6 py-6">
         <Tabs defaultValue="live" className="w-full">
           <TabsList className="grid w-full grid-cols-4 mb-6">
             <TabsTrigger value="live" className="text-xs sm:text-sm">
@@ -453,46 +458,48 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
                   </CardContent>
                 </Card>
 
-                {/* Real-time Metrics */}
-                <div className="space-y-4">
-                  <h3 className="text-black"><span className="font-bold">Real-Time Metrics</span></h3>
-                  <div className="bg-white border border-gray-200 rounded-2xl p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <Activity className="text-[#FF901F]" size={20} />
-                        <span className="text-black font-bold">Pitch Accuracy</span>
+                {/* Real-time Metrics - Only show when practicing or after practice */}
+                {(isPracticing || timer > 0) && (
+                  <div className="space-y-4">
+                    <h3 className="text-black"><span className="font-bold">Real-Time Metrics</span></h3>
+                    <div className="bg-white border border-gray-200 rounded-2xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Activity className="text-[#FF901F]" size={20} />
+                          <span className="text-black font-bold">Pitch Accuracy</span>
+                        </div>
+                        <span className={`text-lg ${pitchAccuracy >= 80 ? 'text-green-600' : 'text-yellow-600'}`}>
+                          {Math.round(pitchAccuracy)}%
+                        </span>
                       </div>
-                      <span className={`text-lg ${pitchAccuracy >= 80 ? 'text-green-600' : 'text-yellow-600'}`}>
-                        {Math.round(pitchAccuracy)}%
-                      </span>
+                      <Progress value={pitchAccuracy} className="h-3" />
                     </div>
-                    <Progress value={pitchAccuracy} className="h-3" />
-                  </div>
 
-                  <div className="bg-white border border-gray-200 rounded-2xl p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <Activity className="text-[#FF901F]" size={20} />
-                        <span className="text-black font-bold">Rhythm Accuracy</span>
+                    <div className="bg-white border border-gray-200 rounded-2xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Activity className="text-[#FF901F]" size={20} />
+                          <span className="text-black font-bold">Rhythm Accuracy</span>
+                        </div>
+                        <span className={`text-lg ${rhythmAccuracy >= 85 ? 'text-green-600' : 'text-yellow-600'}`}>
+                          {Math.round(rhythmAccuracy)}%
+                        </span>
                       </div>
-                      <span className={`text-lg ${rhythmAccuracy >= 85 ? 'text-green-600' : 'text-yellow-600'}`}>
-                        {Math.round(rhythmAccuracy)}%
-                      </span>
+                      <Progress value={rhythmAccuracy} className="h-3" />
                     </div>
-                    <Progress value={rhythmAccuracy} className="h-3" />
-                  </div>
 
-                  <div className="bg-white border border-gray-200 rounded-2xl p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <Activity className="text-[#FF901F]" size={20} />
-                        <span className="text-black font-bold">Bow Stability</span>
+                    <div className="bg-white border border-gray-200 rounded-2xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Activity className="text-[#FF901F]" size={20} />
+                          <span className="text-black font-bold">Bow Stability</span>
+                        </div>
+                        <span className="text-lg text-green-600">{Math.round(bowStability)}%</span>
                       </div>
-                      <span className="text-lg text-green-600">{Math.round(bowStability)}%</span>
+                      <Progress value={bowStability} className="h-3" />
                     </div>
-                    <Progress value={bowStability} className="h-3" />
                   </div>
-                </div>
+                )}
               </div>
 
               {/* Right Column - Controls */}
@@ -724,7 +731,7 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
           
           {/* Tools Tab */}
           <TabsContent value="tools" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Metronome */}
               <Card className="border-gray-200">
                 <CardHeader>
@@ -941,6 +948,104 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
                       <>
                         <Play size={20} className="mr-2" />
                         <span className="font-bold">Start Tuner</span>
+                      </>
+                    )}
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Shruti (Drone) */}
+              <Card className="border-gray-200">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Volume2 className="text-[#FF901F]" size={20} />
+                    <span className="font-bold">Shruti (Drone)</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Visual Indicator */}
+                  <div className="flex items-center justify-center">
+                    <div className="relative w-32 h-32">
+                      {/* Pulsing circles when active */}
+                      {shrutiActive && (
+                        <>
+                          <div className="absolute inset-0 rounded-full bg-[#FF901F] opacity-20 animate-ping"></div>
+                          <div className="absolute inset-2 rounded-full bg-[#FF901F] opacity-30 animate-pulse"></div>
+                        </>
+                      )}
+
+                      {/* Center pitch display */}
+                      <div className={`absolute inset-0 flex flex-col items-center justify-center rounded-full border-4 transition-all ${
+                        shrutiActive
+                          ? 'border-[#FF901F] bg-gradient-to-br from-orange-50 to-orange-100'
+                          : 'border-gray-300 bg-white'
+                      }`}>
+                        <div className={`text-4xl font-bold ${shrutiActive ? 'text-[#FF901F]' : 'text-gray-400'}`}>
+                          {shrutiPitch}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {shrutiActive ? 'Playing' : 'Idle'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pitch Selection */}
+                  <div>
+                    <Label className="text-sm text-gray-600 mb-2 block">Select Pitch (Swara)</Label>
+                    <Select value={shrutiPitch} onValueChange={setShrutiPitch}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="C">C (Sa)</SelectItem>
+                        <SelectItem value="C#">C# (Komal Re)</SelectItem>
+                        <SelectItem value="D">D (Re)</SelectItem>
+                        <SelectItem value="D#">D# (Komal Ga)</SelectItem>
+                        <SelectItem value="E">E (Ga)</SelectItem>
+                        <SelectItem value="F">F (Ma)</SelectItem>
+                        <SelectItem value="F#">F# (Tivra Ma)</SelectItem>
+                        <SelectItem value="G">G (Pa)</SelectItem>
+                        <SelectItem value="G#">G# (Komal Dha)</SelectItem>
+                        <SelectItem value="A">A (Dha)</SelectItem>
+                        <SelectItem value="A#">A# (Komal Ni)</SelectItem>
+                        <SelectItem value="B">B (Ni)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Quick pitch buttons */}
+                  <div>
+                    <Label className="text-sm text-gray-600 mb-2 block">Quick Select</Label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {['C', 'D', 'E', 'F', 'G', 'A', 'B'].map((pitch) => (
+                        <Button
+                          key={pitch}
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShrutiPitch(pitch)}
+                          className={`${shrutiPitch === pitch ? 'bg-[#FF901F] text-white border-[#FF901F]' : ''}`}
+                        >
+                          {pitch}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Control Button */}
+                  <Button
+                    onClick={() => setShrutiActive(!shrutiActive)}
+                    className={`w-full ${shrutiActive ? 'bg-red-500 hover:bg-red-600' : 'bg-[#FF901F] hover:bg-[#E67F0C]'} text-white py-4 rounded-xl`}
+                  >
+                    {shrutiActive ? (
+                      <>
+                        <Pause size={18} className="mr-2" />
+                        <span className="font-semibold">Stop Shruti</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play size={18} className="mr-2" />
+                        <span className="font-semibold">Start Shruti</span>
                       </>
                     )}
                   </Button>

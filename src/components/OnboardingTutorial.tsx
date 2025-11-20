@@ -13,14 +13,6 @@ interface TutorialStep {
 
 const tutorialSteps: TutorialStep[] = [
   {
-    id: 'welcome',
-    title: 'Welcome to Violify! 🎉',
-    description: 'Let\'s take a quick tour to help you get started with your Carnatic violin journey.',
-    targetId: 'home-header',
-    position: 'bottom',
-    arrow: 'down'
-  },
-  {
     id: 'practice',
     title: 'Start Practicing',
     description: 'Tap here to begin your practice session. Our AI will listen and provide real-time feedback on your playing.',
@@ -31,7 +23,7 @@ const tutorialSteps: TutorialStep[] = [
   {
     id: 'lessons',
     title: 'Explore Lessons',
-    description: 'Browse through structured lessons tailored to your skill level. We\'ve created a sample lesson for you to try!',
+    description: 'Browse through structured lessons tailored to your skill level.',
     targetId: 'lessons-tab',
     position: 'top',
     arrow: 'up'
@@ -61,6 +53,7 @@ interface OnboardingTutorialProps {
 export default function OnboardingTutorial({ onComplete }: OnboardingTutorialProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
+  const [highlightPosition, setHighlightPosition] = useState({ top: 0, left: 0, width: 0, height: 0 });
   const [showTutorial, setShowTutorial] = useState(true);
 
   const step = tutorialSteps[currentStep];
@@ -73,8 +66,15 @@ export default function OnboardingTutorial({ onComplete }: OnboardingTutorialPro
       if (!targetElement) return;
 
       const rect = targetElement.getBoundingClientRect();
+      const tooltipWidth = 384; // max-w-sm = 24rem = 384px
+      const tooltipHeight = 300; // approximate height
+      const padding = 20;
+
       let top = 0;
       let left = 0;
+
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
 
       switch (step.position) {
         case 'bottom':
@@ -83,7 +83,15 @@ export default function OnboardingTutorial({ onComplete }: OnboardingTutorialPro
           break;
         case 'top':
           top = rect.top - 20;
-          left = rect.left + rect.width / 2;
+          // For bottom nav tabs, center the tooltip in the viewport for better visibility
+          // Instead of trying to align with the small button
+          if (viewportWidth < 1024) {
+            // Mobile: center in viewport
+            left = viewportWidth / 2;
+          } else {
+            // Desktop: use a comfortable left-center position
+            left = viewportWidth / 3;
+          }
           break;
         case 'left':
           top = rect.top + rect.height / 2;
@@ -95,7 +103,32 @@ export default function OnboardingTutorial({ onComplete }: OnboardingTutorialPro
           break;
       }
 
+      // Keep tooltip within viewport bounds with padding
+      const safeLeft = Math.max(
+        tooltipWidth / 2 + padding + 10,
+        Math.min(left, viewportWidth - tooltipWidth / 2 - padding - 10)
+      );
+      left = safeLeft;
+
+      // Adjust vertical position
+      if (step.position === 'top' && top - tooltipHeight < padding) {
+        // If top position goes off screen, show below instead
+        top = rect.bottom + 20;
+      } else if (step.position === 'bottom' && top + tooltipHeight > viewportHeight - padding) {
+        // If bottom position goes off screen, show above instead
+        top = rect.top - 20;
+      }
+
       setTooltipPosition({ top, left });
+
+      // Store highlight position for spotlight effect with padding for rounded effect
+      const spotlightPadding = 12; // Padding around the button for smooth cutout
+      setHighlightPosition({
+        top: rect.top - spotlightPadding,
+        left: rect.left - spotlightPadding,
+        width: rect.width + (spotlightPadding * 2),
+        height: rect.height + (spotlightPadding * 2)
+      });
 
       // Add highlight to target element
       targetElement.classList.add('tutorial-highlight');
@@ -152,12 +185,30 @@ export default function OnboardingTutorial({ onComplete }: OnboardingTutorialPro
 
   return (
     <>
-      {/* Overlay */}
-      <div className="fixed inset-0 bg-black/60 z-[9998] pointer-events-none" />
+      {/* Overlay with blur effect - rounded spotlight cutout */}
+      <div
+        className="fixed inset-0 z-[9998] pointer-events-none transition-all duration-300 bg-black/70 backdrop-blur-sm"
+        style={{
+          maskImage: `radial-gradient(
+            ellipse ${highlightPosition.width / 2 + 20}px ${highlightPosition.height / 2 + 20}px at
+            ${highlightPosition.left + highlightPosition.width / 2}px
+            ${highlightPosition.top + highlightPosition.height / 2}px,
+            transparent 0,
+            black ${Math.max(highlightPosition.width / 2 + 20, highlightPosition.height / 2 + 20)}px
+          )`,
+          WebkitMaskImage: `radial-gradient(
+            ellipse ${highlightPosition.width / 2 + 20}px ${highlightPosition.height / 2 + 20}px at
+            ${highlightPosition.left + highlightPosition.width / 2}px
+            ${highlightPosition.top + highlightPosition.height / 2}px,
+            transparent 0,
+            black ${Math.max(highlightPosition.width / 2 + 20, highlightPosition.height / 2 + 20)}px
+          )`,
+        }}
+      />
 
       {/* Tooltip */}
       <div
-        className="fixed z-[9999] transform -translate-x-1/2"
+        className="fixed z-[9999] transform -translate-x-1/2 animate-fadeIn"
         style={{
           top: `${tooltipPosition.top}px`,
           left: `${tooltipPosition.left}px`,
@@ -171,7 +222,7 @@ export default function OnboardingTutorial({ onComplete }: OnboardingTutorialPro
         </div>
 
         {/* Tooltip Card */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 max-w-sm border-2 border-[#FF901F]">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 max-w-sm border-2 border-[#FF901F] shadow-[#FF901F]/20">
           <div className="flex items-start justify-between mb-3">
             <h3 className="text-xl font-bold text-gray-900 dark:text-white">{step.title}</h3>
             <button
@@ -221,14 +272,48 @@ export default function OnboardingTutorial({ onComplete }: OnboardingTutorialPro
         </div>
       </div>
 
-      {/* Global styles for tutorial highlight */}
+      {/* Global styles for tutorial highlight and animations */}
       <style>{`
         .tutorial-highlight {
           position: relative;
           z-index: 9999;
-          box-shadow: 0 0 0 4px rgba(255, 144, 31, 0.5), 0 0 0 8px rgba(255, 144, 31, 0.3);
+          box-shadow:
+            0 0 0 4px rgba(255, 144, 31, 0.8),
+            0 0 0 8px rgba(255, 144, 31, 0.4),
+            0 0 20px 12px rgba(255, 144, 31, 0.3);
           border-radius: 12px;
-          transition: box-shadow 0.3s ease;
+          transition: all 0.3s ease;
+          animation: tutorial-pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes tutorial-pulse {
+          0%, 100% {
+            box-shadow:
+              0 0 0 4px rgba(255, 144, 31, 0.8),
+              0 0 0 8px rgba(255, 144, 31, 0.4),
+              0 0 20px 12px rgba(255, 144, 31, 0.3);
+          }
+          50% {
+            box-shadow:
+              0 0 0 4px rgba(255, 144, 31, 1),
+              0 0 0 8px rgba(255, 144, 31, 0.6),
+              0 0 30px 16px rgba(255, 144, 31, 0.5);
+          }
+        }
+
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translate(-50%, 0) scale(0.95);
+          }
+          to {
+            opacity: 1;
+            transform: translate(-50%, 0) scale(1);
+          }
+        }
+
+        .animate-fadeIn {
+          animation: fadeIn 0.3s ease-out forwards;
         }
       `}</style>
     </>
