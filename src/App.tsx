@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Home, Play, BookOpen, User, BarChart3 } from 'lucide-react';
+import { Home, Play, BookOpen, User, Sparkles } from 'lucide-react';
 import OnboardingScreen from './components/OnboardingScreen';
 import LoginScreen from './components/LoginScreen';
 import SignUpScreen from './components/SignUpScreen';
@@ -11,12 +11,13 @@ import RepetitionCounterScreen from './components/RepetitionCounterScreen';
 import PerformanceReportScreen from './components/PerformanceReportScreen';
 import SettingsScreen from './components/SettingsScreen';
 import AnalyticsScreen from './components/AnalyticsScreen';
+import AIRecordingScreen from './components/AIRecordingScreen';
 import { DarkModeProvider } from './components/DarkModeContext';
 import { AuthProvider, useAuth } from './components/AuthContext';
 import OnboardingTutorial from './components/OnboardingTutorial';
 import logoImage from './assets/violify-logo.jpeg';
 
-type Screen = 'onboarding' | 'login' | 'signup' | 'home' | 'practice' | 'repetition' | 'report' | 'lessons' | 'lesson-detail' | 'settings' | 'analytics';
+type Screen = 'onboarding' | 'login' | 'signup' | 'home' | 'practice' | 'repetition' | 'report' | 'lessons' | 'lesson-detail' | 'settings' | 'analytics' | 'ai-recording';
 
 function AppContent() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('onboarding');
@@ -126,6 +127,8 @@ function AppContent() {
         />;
       case 'analytics':
         return <AnalyticsScreen onNavigate={setCurrentScreen} />;
+      case 'ai-recording':
+        return <AIRecordingScreen onNavigate={setCurrentScreen} />;
       default:
         return <HomeScreen onNavigate={setCurrentScreen} />;
     }
@@ -135,7 +138,7 @@ function AppContent() {
     { id: 'home' as Screen, icon: Home, label: 'Home', elementId: 'home-tab' },
     { id: 'practice' as Screen, icon: Play, label: 'Practice', elementId: 'practice-tab' },
     { id: 'lessons' as Screen, icon: BookOpen, label: 'Lessons', elementId: 'lessons-tab' },
-    { id: 'analytics' as Screen, icon: BarChart3, label: 'Analytics', elementId: 'analytics-tab' },
+    { id: 'ai-recording' as Screen, icon: Sparkles, label: 'AI Coach', elementId: 'ai-tab' },
     { id: 'settings' as Screen, icon: User, label: 'Profile', elementId: 'settings-tab' },
   ];
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { StopCircle, AlertCircle, Activity, Music2, ArrowLeft, Upload, Play, Pause, Volume2, Minus, Plus, Check, X, Sparkles, Target, Edit2, BookOpen, Save, Clock, Calendar, TrendingUp } from 'lucide-react';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
@@ -71,15 +71,24 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
   const [bpm, setBpm] = useState(120);
   const [timeSignature, setTimeSignature] = useState('4/4');
   const [currentBeat, setCurrentBeat] = useState(0);
-  
+  const metronomeAudioContextRef = useRef<AudioContext | null>(null);
+  const metronomeIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   // Tuner state
   const [tunerActive, setTunerActive] = useState(false);
-  const [currentNote, setCurrentNote] = useState('C');
+  const [currentNote, setCurrentNote] = useState('--');
   const [tuning, setTuning] = useState(0); // -50 to 50 cents
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const microphoneRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   // Shruti (Drone) state
   const [shrutiActive, setShrutiActive] = useState(false);
   const [shrutiPitch, setShrutiPitch] = useState('C');
+  const shrutiAudioContextRef = useRef<AudioContext | null>(null);
+  const shrutiOscillatorsRef = useRef<OscillatorNode[]>([]);
+  const shrutiGainNodesRef = useRef<GainNode[]>([]);
 
   // Recording state
   const [studentRecording, setStudentRecording] = useState<string | null>(null);
@@ -137,31 +146,361 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
     return () => clearInterval(interval);
   }, [isPracticing]);
   
-  // Simulate tuner detection
+  // Real-time pitch detection with tuner
   useEffect(() => {
+    const startTuner = async () => {
+      try {
+        // Request microphone access
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        // Create audio context and analyzer
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 2048;
+        const microphone = audioContext.createMediaStreamSource(stream);
+        microphone.connect(analyser);
+
+        // Store refs
+        audioContextRef.current = audioContext;
+        analyserRef.current = analyser;
+        microphoneRef.current = microphone;
+
+        // Pitch detection using autocorrelation
+        const bufferLength = analyser.fftSize;
+        const buffer = new Float32Array(bufferLength);
+
+        const noteStrings = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+        const frequencyToNote = (frequency: number) => {
+          const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2));
+          const noteIndex = Math.round(noteNum) + 69;
+          const noteName = noteStrings[noteIndex % 12];
+          const octave = Math.floor(noteIndex / 12) - 1;
+
+          // Calculate cents difference
+          const cents = Math.floor((noteNum - Math.round(noteNum)) * 100);
+
+          return { note: noteName + octave, cents };
+        };
+
+        const autoCorrelate = (buffer: Float32Array, sampleRate: number) => {
+          let size = buffer.length;
+          let maxSamples = Math.floor(size / 2);
+          let bestOffset = -1;
+          let bestCorrelation = 0;
+          let rms = 0;
+
+          // Calculate RMS (root mean square) for volume detection
+          for (let i = 0; i < size; i++) {
+            rms += buffer[i] * buffer[i];
+          }
+          rms = Math.sqrt(rms / size);
+
+          // Not enough signal
+          if (rms < 0.01) return -1;
+
+          // Find the best correlation
+          let lastCorrelation = 1;
+          for (let offset = 1; offset < maxSamples; offset++) {
+            let correlation = 0;
+            for (let i = 0; i < maxSamples; i++) {
+              correlation += Math.abs(buffer[i] - buffer[i + offset]);
+            }
+            correlation = 1 - (correlation / maxSamples);
+
+            if (correlation > 0.9 && correlation > lastCorrelation) {
+              let foundGoodCorrelation = false;
+              if (correlation > bestCorrelation) {
+                bestCorrelation = correlation;
+                bestOffset = offset;
+                foundGoodCorrelation = true;
+              }
+              if (foundGoodCorrelation) {
+                // Refine using parabolic interpolation
+                const shift = (buffer[bestOffset + 1] - buffer[bestOffset - 1]) / (2 * (2 * buffer[bestOffset] - buffer[bestOffset - 1] - buffer[bestOffset + 1]));
+                return sampleRate / (bestOffset + shift);
+              }
+            }
+            lastCorrelation = correlation;
+          }
+
+          if (bestCorrelation > 0.01) {
+            return sampleRate / bestOffset;
+          }
+          return -1;
+        };
+
+        const detectPitch = () => {
+          if (!analyserRef.current) return;
+
+          analyserRef.current.getFloatTimeDomainData(buffer);
+          const frequency = autoCorrelate(buffer, audioContext.sampleRate);
+
+          if (frequency > 0) {
+            const { note, cents } = frequencyToNote(frequency);
+            setCurrentNote(note);
+            setTuning(cents);
+          }
+
+          animationFrameRef.current = requestAnimationFrame(detectPitch);
+        };
+
+        detectPitch();
+      } catch (error) {
+        console.error('Error accessing microphone:', error);
+        setCurrentNote('--');
+        setTuning(0);
+      }
+    };
+
+    const stopTuner = () => {
+      // Cancel animation frame
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+
+      // Stop microphone
+      if (microphoneRef.current) {
+        microphoneRef.current.mediaStream.getTracks().forEach(track => track.stop());
+        microphoneRef.current.disconnect();
+        microphoneRef.current = null;
+      }
+
+      // Close audio context
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+
+      // Reset UI
+      setCurrentNote('--');
+      setTuning(0);
+    };
+
     if (tunerActive) {
-      const interval = setInterval(() => {
-        const notes = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
-        setCurrentNote(notes[Math.floor(Math.random() * notes.length)]);
-        setTuning(Math.floor(Math.random() * 100) - 50);
-      }, 2000);
-      return () => clearInterval(interval);
+      startTuner();
+    } else {
+      stopTuner();
     }
+
+    return () => {
+      stopTuner();
+    };
   }, [tunerActive]);
   
-  // Metronome beat cycle
+  // Metronome beat cycle with sound
   useEffect(() => {
+    const playMetronomeClick = (isFirstBeat: boolean) => {
+      if (!metronomeAudioContextRef.current) {
+        metronomeAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+
+      const audioContext = metronomeAudioContextRef.current;
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      // First beat: higher pitch (1200 Hz), other beats: lower pitch (800 Hz)
+      oscillator.frequency.value = isFirstBeat ? 1200 : 800;
+      oscillator.type = 'sine';
+
+      // First beat: louder, other beats: softer
+      gainNode.gain.value = isFirstBeat ? 0.3 : 0.15;
+
+      const now = audioContext.currentTime;
+      oscillator.start(now);
+
+      // Quick decay for a sharp click sound
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+      oscillator.stop(now + 0.05);
+    };
+
     if (metronomeActive) {
       const beatsPerMeasure = parseInt(timeSignature.split('/')[0]);
+      let beatCount = 0;
+
+      // Play first beat immediately when starting
+      playMetronomeClick(true);
+      setCurrentBeat(0);
+
       const interval = setInterval(() => {
-        setCurrentBeat((prev) => (prev + 1) % beatsPerMeasure);
-        // Play sound (would be implemented with Web Audio API in production)
+        beatCount = (beatCount + 1) % beatsPerMeasure;
+        setCurrentBeat(beatCount);
+        playMetronomeClick(beatCount === 0);
       }, (60 / bpm) * 1000);
-      return () => clearInterval(interval);
+
+      metronomeIntervalRef.current = interval;
+      return () => {
+        clearInterval(interval);
+        metronomeIntervalRef.current = null;
+      };
     } else {
       setCurrentBeat(0);
+      if (metronomeIntervalRef.current) {
+        clearInterval(metronomeIntervalRef.current);
+        metronomeIntervalRef.current = null;
+      }
     }
   }, [metronomeActive, bpm, timeSignature]);
+
+  // Shruti (Drone) - Fluctuating between Sa and Pa
+  useEffect(() => {
+    const noteToFrequency = (note: string): number => {
+      // Map note names to frequencies (lower octave for richer sound - C3 = 130.81 Hz)
+      const noteFrequencies: { [key: string]: number } = {
+        'C': 130.81,
+        'C#': 138.59,
+        'D': 146.83,
+        'D#': 155.56,
+        'E': 164.81,
+        'F': 174.61,
+        'F#': 185.00,
+        'G': 196.00,
+        'G#': 207.65,
+        'A': 220.00,
+        'A#': 233.08,
+        'B': 246.94,
+      };
+      return noteFrequencies[note] || 130.81;
+    };
+
+    const startShruti = () => {
+      // Create audio context
+      if (!shrutiAudioContextRef.current) {
+        shrutiAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+
+      const audioContext = shrutiAudioContextRef.current;
+      const saFreq = noteToFrequency(shrutiPitch); // Sa (tonic)
+      const paFreq = saFreq * 1.5; // Pa (perfect fifth)
+
+      const oscillators: OscillatorNode[] = [];
+      const gainNodes: GainNode[] = [];
+
+      // Harmonics for Sa (tonic)
+      const saHarmonics = [
+        { multiplier: 1, baseGain: 0.15, detune: 0 },
+        { multiplier: 2, baseGain: 0.10, detune: -2 },
+        { multiplier: 3, baseGain: 0.06, detune: 1 },
+        { multiplier: 0.5, baseGain: 0.12, detune: 1 },
+      ];
+
+      // Harmonics for Pa (perfect fifth)
+      const paHarmonics = [
+        { multiplier: 1, baseGain: 0.15, detune: 0 },
+        { multiplier: 2, baseGain: 0.10, detune: -2 },
+        { multiplier: 0.5, baseGain: 0.10, detune: 1 },
+      ];
+
+      // Create Sa oscillators with master gain
+      const saMasterGain = audioContext.createGain();
+      saMasterGain.connect(audioContext.destination);
+
+      saHarmonics.forEach(harmonic => {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        oscillator.frequency.value = saFreq * harmonic.multiplier;
+        oscillator.type = 'sine';
+        oscillator.detune.value = harmonic.detune;
+        gainNode.gain.value = harmonic.baseGain;
+
+        oscillator.connect(gainNode);
+        gainNode.connect(saMasterGain);
+        oscillator.start();
+
+        oscillators.push(oscillator);
+        gainNodes.push(gainNode);
+      });
+
+      // Create Pa oscillators with master gain
+      const paMasterGain = audioContext.createGain();
+      paMasterGain.connect(audioContext.destination);
+
+      paHarmonics.forEach(harmonic => {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        oscillator.frequency.value = paFreq * harmonic.multiplier;
+        oscillator.type = 'sine';
+        oscillator.detune.value = harmonic.detune;
+        gainNode.gain.value = harmonic.baseGain;
+
+        oscillator.connect(gainNode);
+        gainNode.connect(paMasterGain);
+        oscillator.start();
+
+        oscillators.push(oscillator);
+        gainNodes.push(gainNode);
+      });
+
+      // LFO to fluctuate between Sa and Pa (characteristic tanpura jivari effect)
+      const lfo = audioContext.createOscillator();
+      const lfoGain = audioContext.createGain();
+
+      lfo.frequency.value = 1.2; // Fluctuation speed (1.2 Hz)
+      lfoGain.gain.value = 0.5; // Modulation depth
+
+      lfo.connect(lfoGain);
+
+      // Set base gains
+      saMasterGain.gain.value = 0.6;
+      paMasterGain.gain.value = 0.4;
+
+      // Connect LFO to modulate between Sa and Pa
+      // When LFO goes positive, Sa gets louder and Pa gets quieter
+      lfoGain.connect(saMasterGain.gain);
+
+      // Invert for Pa (use negative connection via intermediate gain)
+      const invertGain = audioContext.createGain();
+      invertGain.gain.value = -1;
+      lfoGain.connect(invertGain);
+      invertGain.connect(paMasterGain.gain);
+
+      lfo.start();
+
+      oscillators.push(lfo);
+      gainNodes.push(saMasterGain, paMasterGain, lfoGain, invertGain);
+
+      // Store all refs
+      shrutiOscillatorsRef.current = oscillators;
+      shrutiGainNodesRef.current = gainNodes;
+    };
+
+    const stopShruti = () => {
+      // Stop all oscillators
+      shrutiOscillatorsRef.current.forEach(oscillator => {
+        try {
+          oscillator.stop();
+        } catch (e) {
+          // Oscillator may already be stopped
+        }
+      });
+      shrutiOscillatorsRef.current = [];
+
+      // Clear gain nodes
+      shrutiGainNodesRef.current = [];
+
+      // Close audio context
+      if (shrutiAudioContextRef.current) {
+        shrutiAudioContextRef.current.close();
+        shrutiAudioContextRef.current = null;
+      }
+    };
+
+    if (shrutiActive) {
+      startShruti();
+    } else {
+      stopShruti();
+    }
+
+    return () => {
+      stopShruti();
+    };
+  }, [shrutiActive, shrutiPitch]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
