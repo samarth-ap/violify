@@ -138,7 +138,7 @@ function AppContent() {
     { id: 'home' as Screen, icon: Home, label: 'Home', elementId: 'home-tab' },
     { id: 'practice' as Screen, icon: Play, label: 'Practice', elementId: 'practice-tab' },
     { id: 'lessons' as Screen, icon: BookOpen, label: 'Lessons', elementId: 'lessons-tab' },
-    { id: 'ai-recording' as Screen, icon: Sparkles, label: 'AI Coach', elementId: 'ai-tab' },
+    { id: 'ai-recording' as Screen, icon: Sparkles, label: 'Coach', elementId: 'ai-tab' },
     { id: 'settings' as Screen, icon: User, label: 'Profile', elementId: 'settings-tab' },
   ];
 
