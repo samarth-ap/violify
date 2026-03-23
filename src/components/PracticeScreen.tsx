@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Label } from './ui/label';
 import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import SwaraDetector from './SwaraDetector';
 
 interface PracticeScreenProps {
   onNavigate: (screen: string) => void;
@@ -636,6 +637,9 @@ export default function PracticeScreen({ onNavigate: _onNavigate, selectedLesson
                   )}
                 </div>
                 
+                {/* Live Swara Detector */}
+                <SwaraDetector />
+
                 {/* Session Info */}
                 {selectedLesson && (
                   <div className="bg-white border border-gray-200 rounded-2xl p-4">
