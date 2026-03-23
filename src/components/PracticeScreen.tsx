@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { StopCircle, AlertCircle, Activity, Music2, ArrowLeft, Upload, Play, Pause, Volume2, Minus, Plus, Check, X, Sparkles, Target, Edit2, BookOpen, Save, Clock, Calendar, TrendingUp } from 'lucide-react';
+import { StopCircle, AlertCircle, Activity, Music2, Play, Pause, Volume2, Minus, Plus, Check, Target, Edit2, BookOpen, Save, Clock, Calendar, TrendingUp } from 'lucide-react';
+import { useAuth } from './AuthContext';
+import { createPracticeSession, getUserLessons } from '../services/firestore';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { Alert, AlertDescription } from './ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Slider } from './ui/slider';
-import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Label } from './ui/label';
 import { Input } from './ui/input';
@@ -14,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 
 interface PracticeScreenProps {
   onNavigate: (screen: string) => void;
-  selectedLessonId?: number;
+  selectedLessonId?: string;
 }
 
 interface Repetition {
@@ -24,19 +25,11 @@ interface Repetition {
   current: number;
 }
 
-interface Mistake {
-  id: number;
-  time: string;
-  type: 'pitch' | 'rhythm' | 'bow' | 'appaswaram';
-  description: string;
-  howToFix: string;
-  status: 'detected' | 'corrected';
-}
 
 interface PracticeSession {
-  id: number;
+  id: string;
   title: string;
-  lessonId?: number;
+  lessonId?: string;
   lessonTitle?: string;
   startTime: Date;
   duration: number;
@@ -46,7 +39,8 @@ interface PracticeSession {
   bowStability: number;
 }
 
-export default function PracticeScreen({ onNavigate, selectedLessonId }: PracticeScreenProps) {
+export default function PracticeScreen({ onNavigate: _onNavigate, selectedLessonId }: PracticeScreenProps) {
+  const { user } = useAuth();
   const [isPracticing, setIsPracticing] = useState(false);
   const [timer, setTimer] = useState(0);
   const [pitchAccuracy, setPitchAccuracy] = useState(85);
@@ -57,7 +51,7 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
   // Session state
   const [sessionTitle, setSessionTitle] = useState('Practice Session');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [selectedLesson, setSelectedLesson] = useState<number | undefined>(selectedLessonId);
+  const [selectedLesson, setSelectedLesson] = useState<string | undefined>(selectedLessonId);
   const [sessions, setSessions] = useState<PracticeSession[]>([]);
   
   // Repetitions state
@@ -74,59 +68,44 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
   const metronomeAudioContextRef = useRef<AudioContext | null>(null);
   const metronomeIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Tuner state
-  const [tunerActive, setTunerActive] = useState(false);
-  const [currentNote, setCurrentNote] = useState('--');
-  const [tuning, setTuning] = useState(0); // -50 to 50 cents
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const microphoneRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
-
   // Shruti (Drone) state
   const [shrutiActive, setShrutiActive] = useState(false);
   const [shrutiPitch, setShrutiPitch] = useState('C');
   const shrutiAudioContextRef = useRef<AudioContext | null>(null);
   const shrutiOscillatorsRef = useRef<OscillatorNode[]>([]);
   const shrutiGainNodesRef = useRef<GainNode[]>([]);
+  const shrutiIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const shrutiIframeRef = useRef<HTMLIFrameElement | null>(null);
 
-  // Recording state
-  const [studentRecording, setStudentRecording] = useState<string | null>(null);
-  const [teacherRecording, setTeacherRecording] = useState<string | null>(null);
-  const [correctedRecording, setCorrectedRecording] = useState<string | null>(null);
-  const [analysisComplete, setAnalysisComplete] = useState(false);
-  
-  // Mistakes detected
-  const [mistakes, setMistakes] = useState<Mistake[]>([
-    {
-      id: 1,
-      time: '0:15',
-      type: 'pitch',
-      description: 'Pitch slightly flat on Sa',
-      howToFix: 'Press finger closer to the bridge and maintain steady bow pressure',
-      status: 'detected'
-    },
-    {
-      id: 2,
-      time: '0:32',
-      type: 'rhythm',
-      description: 'Rhythm slightly rushed',
-      howToFix: 'Practice with metronome at slower tempo, focus on counting',
-      status: 'detected'
-    },
-    {
-      id: 3,
-      time: '0:48',
-      type: 'bow',
-      description: 'Bow pressure uneven',
-      howToFix: 'Maintain consistent bow pressure throughout the stroke',
-      status: 'detected'
-    }
-  ]);
+  // Hardcoded tanpura drone YouTube videos per pitch
+  const SHRUTI_VIDEOS: Record<string, { id: string; start?: number }> = {
+    'C':  { id: 'mKcAC1Mav_8', start: 314 },
+    'C#': { id: 'AJAeFBgM_z0' },
+    'D':  { id: 'jpaR2KdQ63I' },
+    'D#': { id: 'zoTw4MELlt8' },
+    'E':  { id: '0wAKomfxsl0', start: 440 },
+    'F':  { id: 'x9O6UAVOOdE', start: 1701 },
+    'F#': { id: 'v63I95EIics', start: 417 },
+    'G':  { id: 'j1skTY6IdQg', start: 1904 },
+    'G#': { id: 'JGq1HPfbcSo' },
+    'A':  { id: 'ooiA2yx5Wsg' },
+    'A#': { id: 'k0Aa0z_sRdk', start: 562 },
+    'B':  { id: '3valEgYPsGw' },
+  };
+
+  const currentShrutiVideo = SHRUTI_VIDEOS[shrutiPitch];
+  const currentShrutiYtId = currentShrutiVideo?.id ?? null;
+
   
   // Available lessons for selection
-  // TODO: Fetch real lessons from Firestore when user creates them
-  const lessons: { id: number; title: string; }[] = [];
+  const [lessons, setLessons] = useState<{ id: string; title: string; }[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+    getUserLessons(user.uid, 50).then(fetchedLessons => {
+      setLessons(fetchedLessons.map(l => ({ id: l.id, title: l.title })));
+    }).catch(console.error);
+  }, [user]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -145,149 +124,6 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
     }
     return () => clearInterval(interval);
   }, [isPracticing]);
-  
-  // Real-time pitch detection with tuner
-  useEffect(() => {
-    const startTuner = async () => {
-      try {
-        // Request microphone access
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-        // Create audio context and analyzer
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 2048;
-        const microphone = audioContext.createMediaStreamSource(stream);
-        microphone.connect(analyser);
-
-        // Store refs
-        audioContextRef.current = audioContext;
-        analyserRef.current = analyser;
-        microphoneRef.current = microphone;
-
-        // Pitch detection using autocorrelation
-        const bufferLength = analyser.fftSize;
-        const buffer = new Float32Array(bufferLength);
-
-        const noteStrings = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-
-        const frequencyToNote = (frequency: number) => {
-          const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2));
-          const noteIndex = Math.round(noteNum) + 69;
-          const noteName = noteStrings[noteIndex % 12];
-          const octave = Math.floor(noteIndex / 12) - 1;
-
-          // Calculate cents difference
-          const cents = Math.floor((noteNum - Math.round(noteNum)) * 100);
-
-          return { note: noteName + octave, cents };
-        };
-
-        const autoCorrelate = (buffer: Float32Array, sampleRate: number) => {
-          let size = buffer.length;
-          let maxSamples = Math.floor(size / 2);
-          let bestOffset = -1;
-          let bestCorrelation = 0;
-          let rms = 0;
-
-          // Calculate RMS (root mean square) for volume detection
-          for (let i = 0; i < size; i++) {
-            rms += buffer[i] * buffer[i];
-          }
-          rms = Math.sqrt(rms / size);
-
-          // Not enough signal
-          if (rms < 0.01) return -1;
-
-          // Find the best correlation
-          let lastCorrelation = 1;
-          for (let offset = 1; offset < maxSamples; offset++) {
-            let correlation = 0;
-            for (let i = 0; i < maxSamples; i++) {
-              correlation += Math.abs(buffer[i] - buffer[i + offset]);
-            }
-            correlation = 1 - (correlation / maxSamples);
-
-            if (correlation > 0.9 && correlation > lastCorrelation) {
-              let foundGoodCorrelation = false;
-              if (correlation > bestCorrelation) {
-                bestCorrelation = correlation;
-                bestOffset = offset;
-                foundGoodCorrelation = true;
-              }
-              if (foundGoodCorrelation) {
-                // Refine using parabolic interpolation
-                const shift = (buffer[bestOffset + 1] - buffer[bestOffset - 1]) / (2 * (2 * buffer[bestOffset] - buffer[bestOffset - 1] - buffer[bestOffset + 1]));
-                return sampleRate / (bestOffset + shift);
-              }
-            }
-            lastCorrelation = correlation;
-          }
-
-          if (bestCorrelation > 0.01) {
-            return sampleRate / bestOffset;
-          }
-          return -1;
-        };
-
-        const detectPitch = () => {
-          if (!analyserRef.current) return;
-
-          analyserRef.current.getFloatTimeDomainData(buffer);
-          const frequency = autoCorrelate(buffer, audioContext.sampleRate);
-
-          if (frequency > 0) {
-            const { note, cents } = frequencyToNote(frequency);
-            setCurrentNote(note);
-            setTuning(cents);
-          }
-
-          animationFrameRef.current = requestAnimationFrame(detectPitch);
-        };
-
-        detectPitch();
-      } catch (error) {
-        console.error('Error accessing microphone:', error);
-        setCurrentNote('--');
-        setTuning(0);
-      }
-    };
-
-    const stopTuner = () => {
-      // Cancel animation frame
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
-
-      // Stop microphone
-      if (microphoneRef.current) {
-        microphoneRef.current.mediaStream.getTracks().forEach(track => track.stop());
-        microphoneRef.current.disconnect();
-        microphoneRef.current = null;
-      }
-
-      // Close audio context
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
-      }
-
-      // Reset UI
-      setCurrentNote('--');
-      setTuning(0);
-    };
-
-    if (tunerActive) {
-      startTuner();
-    } else {
-      stopTuner();
-    }
-
-    return () => {
-      stopTuner();
-    };
-  }, [tunerActive]);
   
   // Metronome beat cycle with sound
   useEffect(() => {
@@ -346,145 +182,80 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
     }
   }, [metronomeActive, bpm, timeSignature]);
 
-  // Shruti (Drone) - Fluctuating between Sa and Pa
+  // Shruti (Drone) - Tanpura-style plucked drone: Sa–Pa–Sa–Sa cycling pattern
+  // Only runs synthesis when no YouTube URL is configured for this pitch
   useEffect(() => {
-    const noteToFrequency = (note: string): number => {
-      // Map note names to frequencies (lower octave for richer sound - C3 = 130.81 Hz)
-      const noteFrequencies: { [key: string]: number } = {
-        'C': 130.81,
-        'C#': 138.59,
-        'D': 146.83,
-        'D#': 155.56,
-        'E': 164.81,
-        'F': 174.61,
-        'F#': 185.00,
-        'G': 196.00,
-        'G#': 207.65,
-        'A': 220.00,
-        'A#': 233.08,
-        'B': 246.94,
-      };
-      return noteFrequencies[note] || 130.81;
+    if (currentShrutiYtId) return; // YouTube takes over — skip synth
+    const noteFrequencies: { [key: string]: number } = {
+      'C': 130.81, 'C#': 138.59, 'D': 146.83, 'D#': 155.56,
+      'E': 164.81, 'F': 174.61, 'F#': 185.00, 'G': 196.00,
+      'G#': 207.65, 'A': 220.00, 'A#': 233.08, 'B': 246.94,
     };
 
     const startShruti = () => {
-      // Create audio context
-      if (!shrutiAudioContextRef.current) {
-        shrutiAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      }
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      shrutiAudioContextRef.current = ctx;
 
-      const audioContext = shrutiAudioContextRef.current;
-      const saFreq = noteToFrequency(shrutiPitch); // Sa (tonic)
-      const paFreq = saFreq * 1.5; // Pa (perfect fifth)
-
-      const oscillators: OscillatorNode[] = [];
-      const gainNodes: GainNode[] = [];
-
-      // Harmonics for Sa (tonic)
-      const saHarmonics = [
-        { multiplier: 1, baseGain: 0.15, detune: 0 },
-        { multiplier: 2, baseGain: 0.10, detune: -2 },
-        { multiplier: 3, baseGain: 0.06, detune: 1 },
-        { multiplier: 0.5, baseGain: 0.12, detune: 1 },
+      const saFreq = noteFrequencies[shrutiPitch] || 130.81;
+      // Tanpura pattern: Sa (low), Pa (fifth), Sa (high), Sa (high)
+      const pattern = [saFreq, saFreq * 1.5, saFreq * 2, saFreq * 2];
+      // Harmonic series with jivari-style detuning on upper partials
+      const harmonics = [
+        { ratio: 1, gain: 0.50, detune: 0 },
+        { ratio: 2, gain: 0.28, detune: -4 },
+        { ratio: 3, gain: 0.16, detune: 3 },
+        { ratio: 4, gain: 0.10, detune: -2 },
+        { ratio: 5, gain: 0.06, detune: 5 },
+        { ratio: 6, gain: 0.04, detune: -6 },
+        { ratio: 7, gain: 0.02, detune: 8 },
       ];
+      const noteDuration = 1.7; // seconds per pluck
+      let noteIndex = 0;
 
-      // Harmonics for Pa (perfect fifth)
-      const paHarmonics = [
-        { multiplier: 1, baseGain: 0.15, detune: 0 },
-        { multiplier: 2, baseGain: 0.10, detune: -2 },
-        { multiplier: 0.5, baseGain: 0.10, detune: 1 },
-      ];
+      const pluck = (freq: number) => {
+        if (!shrutiAudioContextRef.current) return;
+        const now = ctx.currentTime;
+        const compressor = ctx.createDynamicsCompressor();
+        compressor.threshold.value = -18;
+        compressor.connect(ctx.destination);
 
-      // Create Sa oscillators with master gain
-      const saMasterGain = audioContext.createGain();
-      saMasterGain.connect(audioContext.destination);
+        harmonics.forEach(h => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq * h.ratio;
+          osc.detune.value = h.detune;
+          // Plucked string envelope: instant attack, slow exponential decay
+          gain.gain.setValueAtTime(0, now);
+          gain.gain.linearRampToValueAtTime(h.gain * 0.35, now + 0.006);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + noteDuration * 2.8);
+          osc.connect(gain);
+          gain.connect(compressor);
+          osc.start(now);
+          osc.stop(now + noteDuration * 3);
+          shrutiOscillatorsRef.current.push(osc);
+        });
+      };
 
-      saHarmonics.forEach(harmonic => {
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
+      pluck(pattern[noteIndex % pattern.length]);
+      noteIndex++;
 
-        oscillator.frequency.value = saFreq * harmonic.multiplier;
-        oscillator.type = 'sine';
-        oscillator.detune.value = harmonic.detune;
-        gainNode.gain.value = harmonic.baseGain;
-
-        oscillator.connect(gainNode);
-        gainNode.connect(saMasterGain);
-        oscillator.start();
-
-        oscillators.push(oscillator);
-        gainNodes.push(gainNode);
-      });
-
-      // Create Pa oscillators with master gain
-      const paMasterGain = audioContext.createGain();
-      paMasterGain.connect(audioContext.destination);
-
-      paHarmonics.forEach(harmonic => {
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-
-        oscillator.frequency.value = paFreq * harmonic.multiplier;
-        oscillator.type = 'sine';
-        oscillator.detune.value = harmonic.detune;
-        gainNode.gain.value = harmonic.baseGain;
-
-        oscillator.connect(gainNode);
-        gainNode.connect(paMasterGain);
-        oscillator.start();
-
-        oscillators.push(oscillator);
-        gainNodes.push(gainNode);
-      });
-
-      // LFO to fluctuate between Sa and Pa (characteristic tanpura jivari effect)
-      const lfo = audioContext.createOscillator();
-      const lfoGain = audioContext.createGain();
-
-      lfo.frequency.value = 1.2; // Fluctuation speed (1.2 Hz)
-      lfoGain.gain.value = 0.5; // Modulation depth
-
-      lfo.connect(lfoGain);
-
-      // Set base gains
-      saMasterGain.gain.value = 0.6;
-      paMasterGain.gain.value = 0.4;
-
-      // Connect LFO to modulate between Sa and Pa
-      // When LFO goes positive, Sa gets louder and Pa gets quieter
-      lfoGain.connect(saMasterGain.gain);
-
-      // Invert for Pa (use negative connection via intermediate gain)
-      const invertGain = audioContext.createGain();
-      invertGain.gain.value = -1;
-      lfoGain.connect(invertGain);
-      invertGain.connect(paMasterGain.gain);
-
-      lfo.start();
-
-      oscillators.push(lfo);
-      gainNodes.push(saMasterGain, paMasterGain, lfoGain, invertGain);
-
-      // Store all refs
-      shrutiOscillatorsRef.current = oscillators;
-      shrutiGainNodesRef.current = gainNodes;
+      shrutiIntervalRef.current = setInterval(() => {
+        if (shrutiAudioContextRef.current) {
+          pluck(pattern[noteIndex % pattern.length]);
+          noteIndex++;
+        }
+      }, noteDuration * 1000);
     };
 
     const stopShruti = () => {
-      // Stop all oscillators
-      shrutiOscillatorsRef.current.forEach(oscillator => {
-        try {
-          oscillator.stop();
-        } catch (e) {
-          // Oscillator may already be stopped
-        }
-      });
+      if (shrutiIntervalRef.current) {
+        clearInterval(shrutiIntervalRef.current);
+        shrutiIntervalRef.current = null;
+      }
+      shrutiOscillatorsRef.current.forEach(osc => { try { osc.stop(); } catch (_) {} });
       shrutiOscillatorsRef.current = [];
-
-      // Clear gain nodes
       shrutiGainNodesRef.current = [];
-
-      // Close audio context
       if (shrutiAudioContextRef.current) {
         shrutiAudioContextRef.current.close();
         shrutiAudioContextRef.current = null;
@@ -496,11 +267,17 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
     } else {
       stopShruti();
     }
+    return () => { stopShruti(); };
+  }, [shrutiActive, shrutiPitch, currentShrutiYtId]);
 
-    return () => {
-      stopShruti();
-    };
-  }, [shrutiActive, shrutiPitch]);
+  // Control YouTube iframe play/pause via postMessage (no src reload)
+  useEffect(() => {
+    if (!currentShrutiYtId) return;
+    const iframe = shrutiIframeRef.current;
+    if (!iframe?.contentWindow) return;
+    const cmd = shrutiActive ? 'playVideo' : 'pauseVideo';
+    iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func: cmd, args: [] }), '*');
+  }, [shrutiActive, currentShrutiYtId]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -512,28 +289,43 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
     setIsPracticing(false);
   };
   
-  const handleSaveSession = () => {
-    const newSession: PracticeSession = {
-      id: sessions.length + 1,
-      title: sessionTitle,
-      lessonId: selectedLesson,
-      lessonTitle: lessons.find(l => l.id === selectedLesson)?.title,
-      startTime: new Date(),
-      duration: timer,
-      repetitions: [...repetitions],
-      pitchAccuracy: Math.round(pitchAccuracy),
-      rhythmAccuracy: Math.round(rhythmAccuracy),
-      bowStability: Math.round(bowStability)
-    };
-    
-    setSessions([...sessions, newSession]);
-    
+  const handleSaveSession = async () => {
+    const durationMinutes = Math.max(1, Math.round(timer / 60));
+
+    if (user) {
+      try {
+        const sessionId = await createPracticeSession(user.uid, {
+          lessonId: selectedLesson,
+          date: new Date(),
+          duration: durationMinutes,
+          mistakesCount: 0,
+          correctCount: 0,
+          notes: sessionTitle !== 'Practice Session' ? sessionTitle : undefined,
+        });
+        const newSession: PracticeSession = {
+          id: sessionId,
+          title: sessionTitle,
+          lessonId: selectedLesson,
+          lessonTitle: lessons.find(l => l.id === selectedLesson)?.title,
+          startTime: new Date(),
+          duration: timer,
+          repetitions: [...repetitions],
+          pitchAccuracy: Math.round(pitchAccuracy),
+          rhythmAccuracy: Math.round(rhythmAccuracy),
+          bowStability: Math.round(bowStability),
+        };
+        setSessions([...sessions, newSession]);
+      } catch (err) {
+        console.error('Failed to save session to Firestore:', err);
+      }
+    }
+
     // Reset session
     setTimer(0);
     setRepetitions([]);
     setSessionTitle('Practice Session');
     setSelectedLesson(undefined);
-    
+
     alert('Practice session saved successfully!');
   };
   
@@ -558,50 +350,6 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
     ));
   };
   
-  const handleStudentRecordingUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setStudentRecording(e.target.files[0].name);
-      if (teacherRecording) {
-        setTimeout(() => setAnalysisComplete(true), 2000);
-      }
-    }
-  };
-  
-  const handleTeacherRecordingUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setTeacherRecording(e.target.files[0].name);
-      if (studentRecording) {
-        setTimeout(() => setAnalysisComplete(true), 2000);
-      }
-    }
-  };
-  
-  const handleCorrectedRecordingUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setCorrectedRecording(e.target.files[0].name);
-    }
-  };
-  
-  const checkCorrectedRecording = () => {
-    const isWithinMargin = Math.random() > 0.3;
-    
-    if (isWithinMargin) {
-      setMistakes(mistakes.map(m => m.status === 'detected' ? { ...m, status: 'corrected' as const } : m));
-      alert('Great job! All mistakes corrected within acceptable margin.');
-    } else {
-      alert('Keep practicing! Some aspects need more work.');
-    }
-  };
-  
-  const getMistakeIcon = (type: string) => {
-    switch (type) {
-      case 'pitch': return '🎵';
-      case 'rhythm': return '⏱️';
-      case 'bow': return '🎻';
-      case 'appaswaram': return '⚠️';
-      default: return '📝';
-    }
-  };
 
   return (
     <div className="min-h-screen bg-white pb-24 lg:pb-8 relative">
@@ -656,7 +404,7 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
           {/* Lesson Selection */}
           <div className="flex items-center gap-3">
             <BookOpen className="text-[#FF901F]" size={20} />
-            <Select value={selectedLesson?.toString()} onValueChange={(val) => setSelectedLesson(parseInt(val))}>
+            <Select value={selectedLesson} onValueChange={(val: string) => setSelectedLesson(val)}>
               <SelectTrigger className="max-w-xs">
                 <SelectValue placeholder="Select a lesson (optional)" />
               </SelectTrigger>
@@ -677,14 +425,10 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
           </div>
         </div>
         <Tabs defaultValue="live" className="w-full">
-          <TabsList className="grid w-full grid-cols-4 mb-6">
+          <TabsList className="grid w-full grid-cols-3 mb-6">
             <TabsTrigger value="live" className="text-xs sm:text-sm">
               <span className="hidden sm:inline">Live Practice</span>
               <span className="sm:hidden">Live</span>
-            </TabsTrigger>
-            <TabsTrigger value="comparison" className="text-xs sm:text-sm">
-              <span className="hidden sm:inline">AI Comparison</span>
-              <span className="sm:hidden">AI</span>
             </TabsTrigger>
             <TabsTrigger value="tools" className="text-xs sm:text-sm">Tools</TabsTrigger>
             <TabsTrigger value="history" className="text-xs sm:text-sm">History</TabsTrigger>
@@ -912,165 +656,9 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
             </div>
           </TabsContent>
           
-          {/* AI Comparison Tab */}
-          <TabsContent value="comparison" className="space-y-6">
-            <Card className="border-gray-200">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="text-[#FF901F]" size={20} />
-                  <span className="font-bold">Violify AI Mistake Detection</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Upload Section */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-[#FF901F] transition-colors">
-                    <input
-                      type="file"
-                      accept="audio/*"
-                      onChange={handleStudentRecordingUpload}
-                      className="hidden"
-                      id="student-upload"
-                    />
-                    <label htmlFor="student-upload" className="cursor-pointer">
-                      <Upload className="mx-auto text-gray-400 mb-2" size={32} />
-                      <p className="text-black mb-1 font-bold">Upload Student Recording</p>
-                      {studentRecording ? (
-                        <p className="text-sm text-green-600">✓ {studentRecording}</p>
-                      ) : (
-                        <p className="text-sm text-gray-500">Click to upload</p>
-                      )}
-                    </label>
-                  </div>
-                  
-                  <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-[#FF901F] transition-colors">
-                    <input
-                      type="file"
-                      accept="audio/*"
-                      onChange={handleTeacherRecordingUpload}
-                      className="hidden"
-                      id="teacher-upload"
-                    />
-                    <label htmlFor="teacher-upload" className="cursor-pointer">
-                      <Upload className="mx-auto text-gray-400 mb-2" size={32} />
-                      <p className="text-black mb-1 font-bold">Upload Teacher Recording</p>
-                      {teacherRecording ? (
-                        <p className="text-sm text-green-600">✓ {teacherRecording}</p>
-                      ) : (
-                        <p className="text-sm text-gray-500">Click to upload</p>
-                      )}
-                    </label>
-                  </div>
-                </div>
-                
-                {/* Analysis Results */}
-                {analysisComplete && (
-                  <div className="space-y-4 mt-6">
-                    <div className="bg-gradient-to-br from-orange-50 to-white p-4 rounded-xl border border-orange-200">
-                      <h4 className="text-black font-bold mb-2">Analysis Complete</h4>
-                      <p className="text-sm text-gray-600">Found {mistakes.filter(m => m.status === 'detected').length} areas for improvement</p>
-                    </div>
-                    
-                    {/* Mistake List */}
-                    {mistakes.map((mistake) => (
-                      <Card key={mistake.id} className={`border-2 ${mistake.status === 'corrected' ? 'border-green-300 bg-green-50' : 'border-gray-200'}`}>
-                        <CardContent className="pt-4">
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex items-start gap-3">
-                              <span className="text-2xl">{getMistakeIcon(mistake.type)}</span>
-                              <div>
-                                <div className="flex items-center gap-2 mb-1">
-                                  <Badge variant="outline" className="capitalize">
-                                    {mistake.type}
-                                  </Badge>
-                                  <span className="text-sm text-gray-500">{mistake.time}</span>
-                                </div>
-                                <p className="text-black mb-2 font-bold">{mistake.description}</p>
-                              </div>
-                            </div>
-                            {mistake.status === 'corrected' ? (
-                              <Check className="text-green-600" size={24} />
-                            ) : (
-                              <X className="text-red-500" size={24} />
-                            )}
-                          </div>
-                          
-                          <div className="bg-white rounded-lg p-3 mb-3">
-                            <p className="text-sm text-gray-700">
-                              <span className="text-[#FF901F] font-bold">💡 How to Fix:</span> {mistake.howToFix}
-                            </p>
-                          </div>
-                          
-                          {mistake.status === 'detected' && (
-                            <Dialog>
-                              <DialogTrigger asChild>
-                                <Button className="w-full bg-[#FF901F] hover:bg-[#E67F0C] text-white">
-                                  <Sparkles size={16} className="mr-2" />
-                                  View 3D Violin Demo (Violify+)
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent className="max-w-2xl">
-                                <DialogHeader>
-                                  <DialogTitle className="font-bold">3D Violin Demonstration</DialogTitle>
-                                  <DialogDescription>
-                                    Watch the correct technique in 3D
-                                  </DialogDescription>
-                                </DialogHeader>
-                                <div className="bg-gradient-to-br from-gray-100 to-gray-50 rounded-xl aspect-video flex items-center justify-center">
-                                  <div className="text-center">
-                                    <div className="text-6xl mb-4">🎻</div>
-                                    <p className="text-gray-600">3D Violin demonstration for {mistake.type} correction</p>
-                                    <p className="text-sm text-gray-500 mt-2">Interactive 3D model showing proper technique</p>
-                                  </div>
-                                </div>
-                              </DialogContent>
-                            </Dialog>
-                          )}
-                        </CardContent>
-                      </Card>
-                    ))}
-                    
-                    {/* Upload Corrected Recording */}
-                    <Card className="border-2 border-[#FF901F] bg-orange-50">
-                      <CardContent className="pt-6">
-                        <h4 className="text-black mb-3 font-bold">Upload Your Corrected Recording</h4>
-                        <div className="border-2 border-dashed border-[#FF901F] rounded-xl p-6 text-center mb-3 bg-white">
-                          <input
-                            type="file"
-                            accept="audio/*"
-                            onChange={handleCorrectedRecordingUpload}
-                            className="hidden"
-                            id="corrected-upload"
-                          />
-                          <label htmlFor="corrected-upload" className="cursor-pointer">
-                            <Upload className="mx-auto text-[#FF901F] mb-2" size={32} />
-                            <p className="text-black mb-1 font-bold">Upload Corrected Recording</p>
-                            {correctedRecording ? (
-                              <p className="text-sm text-green-600">✓ {correctedRecording}</p>
-                            ) : (
-                              <p className="text-sm text-gray-500">Click to upload</p>
-                            )}
-                          </label>
-                        </div>
-                        {correctedRecording && (
-                          <Button
-                            onClick={checkCorrectedRecording}
-                            className="w-full bg-[#FF901F] hover:bg-[#E67F0C] text-white"
-                          >
-                            Check Corrected Recording
-                          </Button>
-                        )}
-                      </CardContent>
-                    </Card>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-          
           {/* Tools Tab */}
           <TabsContent value="tools" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Metronome */}
               <Card className="border-gray-200">
                 <CardHeader>
@@ -1195,7 +783,7 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
                     
                     <Slider
                       value={[bpm]}
-                      onValueChange={(value) => setBpm(value[0])}
+                      onValueChange={(value: number[]) => setBpm(value[0])}
                       min={40}
                       max={240}
                       step={1}
@@ -1242,57 +830,6 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
                 </CardContent>
               </Card>
               
-              {/* Tuner */}
-              <Card className="border-gray-200">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Music2 className="text-[#FF901F]" size={20} />
-                    <span className="font-bold">Tuner</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="text-center">
-                    <div className="text-6xl mb-2 font-bold">{currentNote}</div>
-                    <div className="flex items-center justify-center gap-2 mb-4">
-                      <div className={`px-3 py-1 rounded-full text-sm font-bold ${Math.abs(tuning) < 10 ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                        {tuning > 0 ? '+' : ''}{tuning} cents
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Tuning Indicator */}
-                  <div className="relative h-12 bg-gray-200 rounded-full overflow-hidden">
-                    <div className="absolute inset-y-0 left-1/2 w-1 bg-black"></div>
-                    <div 
-                      className={`absolute inset-y-0 w-2 rounded-full transition-all ${Math.abs(tuning) < 10 ? 'bg-green-500' : 'bg-[#FF901F]'}`}
-                      style={{ left: `calc(50% + ${tuning}px)` }}
-                    ></div>
-                  </div>
-                  
-                  <div className="flex justify-between text-xs text-gray-500 font-bold">
-                    <span>Flat</span>
-                    <span>Sharp</span>
-                  </div>
-                  
-                  <Button
-                    onClick={() => setTunerActive(!tunerActive)}
-                    className={`w-full ${tunerActive ? 'bg-red-500 hover:bg-red-600' : 'bg-[#FF901F] hover:bg-[#E67F0C]'} text-white py-6`}
-                  >
-                    {tunerActive ? (
-                      <>
-                        <Pause size={20} className="mr-2" />
-                        <span className="font-bold">Stop Tuner</span>
-                      </>
-                    ) : (
-                      <>
-                        <Play size={20} className="mr-2" />
-                        <span className="font-bold">Start Tuner</span>
-                      </>
-                    )}
-                  </Button>
-                </CardContent>
-              </Card>
-
               {/* Shruti (Drone) */}
               <Card className="border-gray-200">
                 <CardHeader>
@@ -1370,6 +907,32 @@ export default function PracticeScreen({ onNavigate, selectedLessonId }: Practic
                       ))}
                     </div>
                   </div>
+
+                  {/* Pre-loaded hidden YouTube audio player — mounted always so no load delay on Start */}
+                  {currentShrutiYtId && (() => {
+                    const { id, start } = currentShrutiVideo!;
+                    const src = `https://www.youtube.com/embed/${id}?enablejsapi=1&autoplay=0&loop=1&playlist=${id}${start ? `&start=${start}` : ''}`;
+                    return (
+                      <iframe
+                        key={src}
+                        ref={shrutiIframeRef}
+                        src={src}
+                        allow="autoplay"
+                        title={`Tanpura ${shrutiPitch}`}
+                        style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+                        onLoad={() => {
+                          if (shrutiActive && shrutiIframeRef.current?.contentWindow) {
+                            // Delay slightly to let YouTube player JS initialize before accepting commands
+                            setTimeout(() => {
+                              shrutiIframeRef.current?.contentWindow?.postMessage(
+                                JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*'
+                              );
+                            }, 300);
+                          }
+                        }}
+                      />
+                    );
+                  })()}
 
                   {/* Control Button */}
                   <Button

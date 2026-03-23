@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Mic, Bell, CreditCard, HelpCircle, LogOut, ChevronRight, Crown, Mail, User as UserIcon, Edit2, Upload, Moon, Sparkles, Zap, BarChart3, HeadphonesIcon, Target, Check } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Mic, Bell, CreditCard, HelpCircle, LogOut, ChevronRight, Mail, User as UserIcon, Edit2, Upload } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import { Switch } from './ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
@@ -9,21 +9,19 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Button } from './ui/button';
-import { useDarkMode } from './DarkModeContext';
 import { useAuth } from './AuthContext';
-import { updateProfile, updateEmail } from 'firebase/auth';
+import { updateProfile } from 'firebase/auth';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { toast } from 'sonner';
 import { getUserProfile, updateUserProfile } from '../services/firestore';
-import logoImage from "../assets/violify-logo.jpeg";
-
+import { storage } from '../config/firebase';
 interface SettingsScreenProps {
   onNavigate: (screen: string) => void;
   isGuestMode?: boolean;
   onGuestLogout?: () => void;
 }
 
-export default function SettingsScreen({ onNavigate, isGuestMode = false, onGuestLogout }: SettingsScreenProps) {
-  const { isDarkMode, toggleDarkMode } = useDarkMode();
+export default function SettingsScreen({ onNavigate: _onNavigate, isGuestMode = false, onGuestLogout }: SettingsScreenProps) {
   const { user, signOut } = useAuth();
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [fullName, setFullName] = useState(user?.displayName || '');
@@ -31,6 +29,9 @@ export default function SettingsScreen({ onNavigate, isGuestMode = false, onGues
   const [phone, setPhone] = useState('');
   const [bio, setBio] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [profilePicUrl, setProfilePicUrl] = useState<string | null>(null);
+  const [isUploadingPic, setIsUploadingPic] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load user data from Firestore on mount
   useEffect(() => {
@@ -43,6 +44,7 @@ export default function SettingsScreen({ onNavigate, isGuestMode = false, onGues
             setEmail(profile.email || '');
             setPhone(profile.phone || '');
             setBio(profile.bio || '');
+            if (profile.profilePictureURL) setProfilePicUrl(profile.profilePictureURL);
           }
         } catch (error) {
           console.error('Error loading user profile:', error);
@@ -52,6 +54,7 @@ export default function SettingsScreen({ onNavigate, isGuestMode = false, onGues
       // Fallback to Firebase Auth data if Firestore fails
       if (user?.displayName) setFullName(user.displayName);
       if (user?.email) setEmail(user.email);
+      if (user?.photoURL) setProfilePicUrl(user.photoURL);
     };
 
     loadUserProfile();
@@ -69,17 +72,11 @@ export default function SettingsScreen({ onNavigate, isGuestMode = false, onGues
         });
       }
 
-      // Update email in Firebase Auth if changed
-      if (email !== user.email && email) {
-        await updateEmail(user, email);
-      }
-
       // Save all profile data to Firestore
       // Wrapped in try-catch so profile updates still work even if Firestore isn't enabled
       try {
         await updateUserProfile(user.uid, {
           displayName: fullName,
-          email: email,
           phone: phone,
           bio: bio
         });
@@ -103,6 +100,28 @@ export default function SettingsScreen({ onNavigate, isGuestMode = false, onGues
       }
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleProfilePicUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    setIsUploadingPic(true);
+    try {
+      const storageRef = ref(storage, `users/${user.uid}/profile.jpg`);
+      await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(storageRef);
+
+      await updateProfile(user, { photoURL: downloadURL });
+      await updateUserProfile(user.uid, { profilePictureURL: downloadURL });
+
+      setProfilePicUrl(downloadURL);
+      toast.success('Profile picture updated!');
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to upload picture.');
+    } finally {
+      setIsUploadingPic(false);
     }
   };
 
@@ -142,6 +161,7 @@ export default function SettingsScreen({ onNavigate, isGuestMode = false, onGues
             <CardContent className="pt-6">
               <div className="flex items-start gap-4">
                 <Avatar className="w-20 h-20 border-4 border-[#FF901F]">
+                  {profilePicUrl && <AvatarImage src={profilePicUrl} alt={fullName || 'Profile'} className="object-cover" />}
                   <AvatarFallback className="bg-[#FF901F] text-white text-2xl">
                     {fullName ? fullName.charAt(0).toUpperCase() : user?.email?.charAt(0).toUpperCase() || 'U'}
                   </AvatarFallback>
@@ -170,13 +190,27 @@ export default function SettingsScreen({ onNavigate, isGuestMode = false, onGues
                           {/* Profile Picture */}
                           <div className="flex flex-col items-center gap-3">
                             <Avatar className="w-24 h-24 border-4 border-[#FF901F]">
+                              {profilePicUrl && <AvatarImage src={profilePicUrl} alt={fullName || 'Profile'} className="object-cover" />}
                               <AvatarFallback className="bg-[#FF901F] text-white text-3xl">
                                 {fullName ? fullName.charAt(0).toUpperCase() : user?.email?.charAt(0).toUpperCase() || 'U'}
                               </AvatarFallback>
                             </Avatar>
-                            <Button variant="outline" size="sm" className="gap-2" disabled>
+                            <input
+                              ref={fileInputRef}
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={handleProfilePicUpload}
+                            />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-2"
+                              disabled={isUploadingPic}
+                              onClick={() => fileInputRef.current?.click()}
+                            >
                               <Upload size={16} />
-                              Change Picture (Coming Soon)
+                              {isUploadingPic ? 'Uploading...' : 'Change Picture'}
                             </Button>
                           </div>
                           
@@ -198,9 +232,10 @@ export default function SettingsScreen({ onNavigate, isGuestMode = false, onGues
                               id="email"
                               type="email"
                               value={email}
-                              onChange={(e) => setEmail(e.target.value)}
-                              placeholder="Enter your email"
+                              readOnly
+                              className="bg-gray-50 text-gray-500 cursor-not-allowed"
                             />
+                            <p className="text-xs text-gray-400">Email cannot be changed after sign-up.</p>
                           </div>
                           
                           {/* Phone */}
@@ -257,94 +292,6 @@ export default function SettingsScreen({ onNavigate, isGuestMode = false, onGues
 
         <div className="lg:grid lg:grid-cols-2 lg:gap-6">
         <div className="lg:col-span-1 space-y-6 mb-6 lg:mb-0">
-        {/* Subscription */}
-        <Card className="border-0 shadow-xl overflow-hidden bg-gradient-to-br from-[#FF901F] via-[#FFA64D] to-[#FFB366] relative">
-          {/* Background Pattern */}
-          <div className="absolute inset-0 opacity-10">
-            <div className="absolute -top-10 -right-10 w-40 h-40 bg-white rounded-full blur-3xl"></div>
-            <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-white rounded-full blur-3xl"></div>
-          </div>
-          
-          <CardContent className="pt-6 relative z-10">
-            {/* Header with Logo */}
-            <div className="flex items-start justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <div className="bg-white rounded-xl p-2 shadow-lg">
-                  <img src={logoImage} alt="Violify" className="w-12 h-12 object-contain" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="text-white">Violify Pro</h3>
-                    <Crown className="text-yellow-300" size={20} fill="currentColor" />
-                  </div>
-                  <p className="text-white/90 text-sm">Premium Membership</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Premium Features */}
-            <div className="bg-white/15 backdrop-blur-sm rounded-xl p-4 mb-4 space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="bg-white/20 rounded-lg p-1.5">
-                  <Check className="text-white" size={16} />
-                </div>
-                <span className="text-white text-sm">Unlimited practice sessions</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="bg-white/20 rounded-lg p-1.5">
-                  <Check className="text-white" size={16} />
-                </div>
-                <span className="text-white text-sm">Advanced AI feedback & analysis</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="bg-white/20 rounded-lg p-1.5">
-                  <Check className="text-white" size={16} />
-                </div>
-                <span className="text-white text-sm">Priority customer support</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="bg-white/20 rounded-lg p-1.5">
-                  <Check className="text-white" size={16} />
-                </div>
-                <span className="text-white text-sm">Detailed performance analytics</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="bg-white/20 rounded-lg p-1.5">
-                  <Check className="text-white" size={16} />
-                </div>
-                <span className="text-white text-sm">Custom practice plans</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="bg-white/20 rounded-lg p-1.5">
-                  <Check className="text-white" size={16} />
-                </div>
-                <span className="text-white text-sm">Ad-free experience</span>
-              </div>
-            </div>
-
-            {/* Billing Info */}
-            <div className="bg-white/15 backdrop-blur-sm rounded-xl p-4 mb-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-white/90 text-sm">Subscription Plan</span>
-                <span className="text-white font-semibold">₹799/month</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-white/90 text-sm">Next Billing Date</span>
-                <span className="text-white font-semibold">Dec 1, 2025</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-white/90 text-sm">Status</span>
-                <Badge className="bg-green-500 text-white border-0 hover:bg-green-600">Active</Badge>
-              </div>
-            </div>
-
-            {/* Action Button */}
-            <button className="w-full bg-white text-[#FF901F] hover:bg-gray-100 py-3.5 rounded-xl transition-all hover:shadow-lg">
-              Manage Subscription
-            </button>
-          </CardContent>
-        </Card>
-
         {/* Permissions */}
         <div>
           <h3 className="text-foreground mb-3 px-2 font-semibold">Permissions</h3>
@@ -353,22 +300,7 @@ export default function SettingsScreen({ onNavigate, isGuestMode = false, onGues
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="bg-orange-50 dark:bg-orange-950/20 rounded-lg p-2">
-                      <Moon className="text-[#FF901F]" size={20} />
-                    </div>
-                    <div>
-                      <div className="text-sm text-foreground">Dark Mode</div>
-                      <div className="text-xs text-muted-foreground">Switch to dark theme</div>
-                    </div>
-                  </div>
-                  <Switch checked={isDarkMode} onCheckedChange={toggleDarkMode} />
-                </div>
-
-                <Separator className="bg-border" />
-
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-orange-50 dark:bg-orange-950/20 rounded-lg p-2">
+                    <div className="bg-orange-50 rounded-lg p-2">
                       <Mic className="text-[#FF901F]" size={20} />
                     </div>
                     <div>
@@ -383,7 +315,7 @@ export default function SettingsScreen({ onNavigate, isGuestMode = false, onGues
 
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="bg-orange-50 dark:bg-orange-950/20 rounded-lg p-2">
+                    <div className="bg-orange-50 rounded-lg p-2">
                       <Bell className="text-[#FF901F]" size={20} />
                     </div>
                     <div>

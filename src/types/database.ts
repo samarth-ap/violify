@@ -24,6 +24,14 @@ export interface Lesson {
   completedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
+  // Carnatic-specific fields
+  ragam?: string;
+  thalam?: string;
+  category?: string;
+  notation?: string;
+  notes?: string;
+  notationFileUrl?: string;
+  recordingUrl?: string;
 }
 
 export interface PracticeSession {

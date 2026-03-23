@@ -85,11 +85,12 @@ export const createLesson = async (userId: string, lessonData: Omit<Lesson, 'id'
     updatedAt: new Date()
   };
 
-  await setDoc(lessonRef, {
-    ...lesson,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  });
+  // Strip undefined fields — Firestore rejects them
+  const docData = Object.fromEntries(
+    Object.entries({ ...lesson, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+      .filter(([, v]) => v !== undefined)
+  );
+  await setDoc(lessonRef, docData);
 
   return lessonRef.id;
 };
@@ -141,11 +142,11 @@ export const createPracticeSession = async (userId: string, sessionData: Omit<Pr
     createdAt: new Date()
   };
 
-  await setDoc(sessionRef, {
-    ...session,
-    date: Timestamp.fromDate(sessionData.date),
-    createdAt: serverTimestamp()
-  });
+  const sessionDoc = Object.fromEntries(
+    Object.entries({ ...session, date: Timestamp.fromDate(sessionData.date), createdAt: serverTimestamp() })
+      .filter(([, v]) => v !== undefined)
+  );
+  await setDoc(sessionRef, sessionDoc);
 
   return sessionRef.id;
 };

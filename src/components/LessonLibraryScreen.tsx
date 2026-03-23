@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useAuth } from "./AuthContext";
+import { createLesson, getUserLessons } from "../services/firestore";
 import {
   Search,
   Plus,
   Music,
   CheckCircle2,
-  Upload,
   Filter,
   X,
 } from "lucide-react";
@@ -33,11 +34,11 @@ import { Textarea } from "./ui/textarea";
 
 interface LessonLibraryScreenProps {
   onNavigate: (screen: string) => void;
-  onNavigateToLesson: (lessonId: number) => void;
+  onNavigateToLesson: (lessonId: string) => void;
 }
 
 interface Lesson {
-  id: number;
+  id: string;
   title: string;
   description: string;
   status: string;
@@ -54,6 +55,7 @@ export default function LessonLibraryScreen({
   onNavigate,
   onNavigateToLesson,
 }: LessonLibraryScreenProps) {
+  const { user } = useAuth();
   const [filter, setFilter] = useState<
     "all" | "in-progress" | "completed"
   >("all");
@@ -62,21 +64,43 @@ export default function LessonLibraryScreen({
   >("date");
   const [isAddLessonOpen, setIsAddLessonOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [lessons, setLessons] = useState<Lesson[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // New lesson form state
   const [newLesson, setNewLesson] = useState({
     title: "",
     description: "",
     notation: "",
-    notationFile: null as File | null,
-    classRecording: null as File | null,
+    notationLink: "",
+    recordingLink: "",
     ragam: "",
     thalam: "",
     difficulty: "",
   });
 
-  // TODO: Fetch real lessons from Firestore when implemented
-  const lessons: Lesson[] = [];
+  // Load lessons from Firestore on mount
+  useEffect(() => {
+    if (!user) return;
+    getUserLessons(user.uid, 100).then(fetched => {
+      setLessons(fetched.map(l => ({
+        id: l.id,
+        title: l.title,
+        description: l.description,
+        status: (l.isCompleted || (l.progress ?? 0) >= 100) ? "completed" : (l.progress ?? 0) > 0 ? "in-progress" : "not-started",
+        note: l.notes || "",
+        category: l.category || "Other",
+        ragam: l.ragam,
+        thalam: l.thalam,
+        difficulty: l.difficulty
+          ? l.difficulty.charAt(0).toUpperCase() + l.difficulty.slice(1)
+          : undefined,
+        createdDate: l.createdAt.toISOString(),
+        progress: l.progress,
+      })));
+    }).catch(console.error);
+  }, [user]);
 
   const filteredLessons = lessons
     .filter((lesson) => {
@@ -153,20 +177,68 @@ export default function LessonLibraryScreen({
     return colors[difficulty] || "bg-gray-100 text-gray-700";
   };
 
-  const handleAddLesson = () => {
-    console.log("Adding lesson:", newLesson);
-    setIsAddLessonOpen(false);
-    // Reset form
+  const resetForm = () => {
     setNewLesson({
       title: "",
       description: "",
       notation: "",
-      notationFile: null,
-      classRecording: null,
+      notationLink: "",
+      recordingLink: "",
       ragam: "",
       thalam: "",
       difficulty: "",
     });
+  };
+
+  const handleAddLesson = async () => {
+    if (!newLesson.title.trim() || !user) return;
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      const difficultyMap: Record<string, 'beginner' | 'intermediate' | 'advanced'> = {
+        Beginner: 'beginner',
+        Intermediate: 'intermediate',
+        Advanced: 'advanced',
+      };
+      const lessonPayload: any = {
+        title: newLesson.title.trim(),
+        description: newLesson.description.trim(),
+        difficulty: difficultyMap[newLesson.difficulty] || 'beginner',
+        duration: 0,
+        progress: 0,
+        isCompleted: false,
+        category: 'Other',
+      };
+      if (newLesson.ragam.trim()) lessonPayload.ragam = newLesson.ragam.trim();
+      if (newLesson.thalam.trim()) lessonPayload.thalam = newLesson.thalam.trim();
+      if (newLesson.notation.trim()) lessonPayload.notation = newLesson.notation.trim();
+      if (newLesson.notationLink.trim()) lessonPayload.notationFileUrl = newLesson.notationLink.trim();
+      if (newLesson.recordingLink.trim()) lessonPayload.recordingUrl = newLesson.recordingLink.trim();
+
+      const id = await createLesson(user.uid, lessonPayload);
+
+      const created: Lesson = {
+        id,
+        title: newLesson.title.trim(),
+        description: newLesson.description.trim(),
+        status: "not-started",
+        note: "",
+        category: "Other",
+        ...(newLesson.ragam.trim() && { ragam: newLesson.ragam.trim() }),
+        ...(newLesson.thalam.trim() && { thalam: newLesson.thalam.trim() }),
+        ...(newLesson.difficulty && { difficulty: newLesson.difficulty }),
+        createdDate: new Date().toISOString(),
+        progress: 0,
+      };
+      setLessons(prev => [created, ...prev]);
+      setIsAddLessonOpen(false);
+      resetForm();
+    } catch (err: any) {
+      console.error("Failed to save lesson:", err);
+      setSaveError(err?.message || "Failed to save. Check Firestore rules.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -246,82 +318,26 @@ export default function LessonLibraryScreen({
                       }
                       rows={4}
                     />
-                    <div className="text-center text-sm text-gray-500 my-2">
-                      OR
-                    </div>
-                    <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 text-center hover:border-[#FF901F] transition-colors">
-                      <input
-                        type="file"
-                        accept=".pdf,.doc,.docx,.txt,image/*"
-                        onChange={(e) =>
-                          setNewLesson({
-                            ...newLesson,
-                            notationFile:
-                              e.target.files?.[0] || null,
-                          })
-                        }
-                        className="hidden"
-                        id="notation-file"
+                    <div className="text-center text-sm text-gray-500 my-2">OR</div>
+                    <div className="space-y-1">
+                      <Input
+                        placeholder="Paste Google Drive or Docs share link"
+                        value={newLesson.notationLink}
+                        onChange={(e) => setNewLesson({ ...newLesson, notationLink: e.target.value })}
                       />
-                      <label
-                        htmlFor="notation-file"
-                        className="cursor-pointer"
-                      >
-                        <Upload
-                          className="mx-auto text-gray-400 mb-2"
-                          size={24}
-                        />
-                        <p className="text-sm text-black">
-                          Upload Notation File
-                        </p>
-                        {newLesson.notationFile && (
-                          <p className="text-sm text-green-600 mt-1">
-                            ✓ {newLesson.notationFile.name}
-                          </p>
-                        )}
-                      </label>
+                      <p className="text-xs text-gray-400">Share the file → Copy link → paste here. Works with Google Docs, Sheets, PDFs.</p>
                     </div>
                   </div>
 
                   {/* Recording */}
                   <div className="space-y-2">
                     <Label>Class Recording</Label>
-                    <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-[#FF901F] transition-colors">
-                      <input
-                        type="file"
-                        accept="audio/*,video/*"
-                        onChange={(e) =>
-                          setNewLesson({
-                            ...newLesson,
-                            classRecording:
-                              e.target.files?.[0] || null,
-                          })
-                        }
-                        className="hidden"
-                        id="class-recording"
-                      />
-                      <label
-                        htmlFor="class-recording"
-                        className="cursor-pointer"
-                      >
-                        <Upload
-                          className="mx-auto text-gray-400 mb-2"
-                          size={32}
-                        />
-                        <p className="text-black mb-1">
-                          Upload Class Recording
-                        </p>
-                        {newLesson.classRecording ? (
-                          <p className="text-sm text-green-600">
-                            ✓ {newLesson.classRecording.name}
-                          </p>
-                        ) : (
-                          <p className="text-sm text-gray-500">
-                            Audio or video file
-                          </p>
-                        )}
-                      </label>
-                    </div>
+                    <Input
+                      placeholder="Paste Google Drive or YouTube link"
+                      value={newLesson.recordingLink}
+                      onChange={(e) => setNewLesson({ ...newLesson, recordingLink: e.target.value })}
+                    />
+                    <p className="text-xs text-gray-400">Share the audio/video → Copy link → paste here. YouTube links also work.</p>
                   </div>
 
                   {/* Tags */}
@@ -393,6 +409,12 @@ export default function LessonLibraryScreen({
                   </div>
                 </div>
 
+                {saveError && (
+                  <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                    {saveError}
+                  </p>
+                )}
+
                 <div className="flex gap-3">
                   <Button
                     variant="outline"
@@ -403,9 +425,10 @@ export default function LessonLibraryScreen({
                   </Button>
                   <Button
                     onClick={handleAddLesson}
-                    className="flex-1 bg-[#FF901F] hover:bg-[#E67F0C] text-white"
+                    disabled={isSaving || !newLesson.title.trim()}
+                    className="flex-1 bg-[#FF901F] hover:bg-[#E67F0C] text-white disabled:opacity-50"
                   >
-                    Add Lesson
+                    {isSaving ? "Saving..." : "Add Lesson"}
                   </Button>
                 </div>
               </DialogContent>
@@ -498,24 +521,33 @@ export default function LessonLibraryScreen({
         {filteredLessons.length === 0 ? (
           <div className="text-center py-12 max-w-md mx-auto">
             <div className="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-950/30 dark:to-orange-900/20 rounded-full w-24 h-24 mx-auto mb-6 flex items-center justify-center">
-              <Music
-                className="text-[#FF901F]"
-                size={48}
-              />
+              <Music className="text-[#FF901F]" size={48} />
             </div>
-            <h3 className="text-2xl font-bold text-black dark:text-white mb-3">
-              Start Your Journey! 🎻
-            </h3>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
-              Create your first lesson to begin tracking your progress. Add notation, recordings, and notes to organize your practice effectively.
-            </p>
-            <Button
-              onClick={() => setIsAddLessonOpen(true)}
-              className="bg-[#FF901F] hover:bg-[#E67F0C] text-white px-8 py-6 text-lg"
-            >
-              <Plus size={24} className="mr-2" />
-              Create Your First Lesson
-            </Button>
+            {lessons.length === 0 ? (
+              <>
+                <h3 className="text-2xl font-bold text-black dark:text-white mb-3">Start Your Journey! 🎻</h3>
+                <p className="text-gray-600 dark:text-gray-400 mb-6">
+                  Create your first lesson to begin tracking your progress. Add notation, recordings, and notes to organize your practice effectively.
+                </p>
+                <Button
+                  onClick={() => setIsAddLessonOpen(true)}
+                  className="bg-[#FF901F] hover:bg-[#E67F0C] text-white px-8 py-6 text-lg"
+                >
+                  <Plus size={24} className="mr-2" />
+                  Create Your First Lesson
+                </Button>
+              </>
+            ) : filter === 'completed' ? (
+              <>
+                <h3 className="text-2xl font-bold text-black dark:text-white mb-3">No completed lessons yet</h3>
+                <p className="text-gray-600 dark:text-gray-400">Set a lesson to 100% progress to mark it as complete.</p>
+              </>
+            ) : (
+              <>
+                <h3 className="text-2xl font-bold text-black dark:text-white mb-3">No lessons found</h3>
+                <p className="text-gray-600 dark:text-gray-400">Try a different search or filter.</p>
+              </>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
