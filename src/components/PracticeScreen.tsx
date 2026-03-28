@@ -597,6 +597,9 @@ export default function PracticeScreen({ onNavigate: _onNavigate, selectedLesson
                   </Alert>
                 )}
 
+                {/* Live Swara Detector */}
+                <SwaraDetector />
+
                 {/* Control Buttons */}
                 <div className="space-y-3">
                   {!isPracticing ? (
@@ -625,7 +628,7 @@ export default function PracticeScreen({ onNavigate: _onNavigate, selectedLesson
                       </p>
                     </>
                   )}
-                  
+
                   {timer > 0 && !isPracticing && (
                     <Button
                       onClick={handleSaveSession}
@@ -636,9 +639,6 @@ export default function PracticeScreen({ onNavigate: _onNavigate, selectedLesson
                     </Button>
                   )}
                 </div>
-                
-                {/* Live Swara Detector */}
-                <SwaraDetector />
 
                 {/* Session Info */}
                 {selectedLesson && (
