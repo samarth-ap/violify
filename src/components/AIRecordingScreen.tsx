@@ -1,658 +1,740 @@
-import { useState, useRef, useEffect } from 'react';
-import { Mic, Square, Play, Pause, Upload, X } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Mic, Square, Play, Pause, Upload, Music, Clock, ChevronRight, TrendingUp, TrendingDown } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card, CardContent } from './ui/card';
+
+// ── Types ──────────────────────────────────────────────────
 
 interface AIRecordingScreenProps {
   onNavigate: (screen: any) => void;
 }
 
-interface Mistake {
-  startTime: number; // in seconds
-  endTime: number;
-  issue: string;
-  suggestion: string;
+interface PitchError {
+  start_s: number;
+  end_s: number;
+  duration_s: number;
+  cents_error: number;
+  direction: 'sharp' | 'flat';
+  teacher_swara: string;
 }
 
+interface OnsetError {
+  teacher_onset: number;
+  student_onset: number;
+  diff_ms: number;
+  direction: 'LATE' | 'EARLY';
+}
+
+// ── Dummy data ─────────────────────────────────────────────
+
+const DUMMY_DURATION = 20;
+const CENTS_THRESHOLD = 30;
+
+const DUMMY_PITCH_ERRORS: PitchError[] = [
+  { start_s: 2.1,  end_s: 2.8,  duration_s: 0.7, cents_error: -45, direction: 'flat',  teacher_swara: 'S'  },
+  { start_s: 5.4,  end_s: 6.1,  duration_s: 0.7, cents_error:  62, direction: 'sharp', teacher_swara: 'G3' },
+  { start_s: 9.2,  end_s: 9.9,  duration_s: 0.7, cents_error: -38, direction: 'flat',  teacher_swara: 'M1' },
+  { start_s: 13.5, end_s: 14.2, duration_s: 0.7, cents_error:  80, direction: 'sharp', teacher_swara: 'P'  },
+  { start_s: 17.8, end_s: 18.5, duration_s: 0.7, cents_error: -55, direction: 'flat',  teacher_swara: 'N3' },
+];
+
+const DUMMY_ONSET_ERRORS: OnsetError[] = [
+  { teacher_onset: 3.5,  student_onset: 3.62,  diff_ms:  120, direction: 'LATE'  },
+  { teacher_onset: 7.8,  student_onset: 7.72,  diff_ms:  -80, direction: 'EARLY' },
+  { teacher_onset: 12.1, student_onset: 12.35, diff_ms:  250, direction: 'LATE'  },
+];
+
+const TEACHER_ONSETS = [1.0, 2.5, 3.5, 4.8, 6.2, 7.8, 9.0, 10.5, 12.1, 13.8, 15.2, 16.7, 18.0];
+const STUDENT_ONSETS  = [1.0, 2.5, 3.62, 4.8, 6.2, 7.72, 9.0, 10.5, 12.35, 13.8, 15.2, 16.7, 18.0];
+
+function generateDummyCentsCurve(numPoints: number): number[] {
+  const curve: number[] = [];
+  for (let i = 0; i < numPoints; i++) {
+    const t = (i / numPoints) * DUMMY_DURATION;
+    const err = DUMMY_PITCH_ERRORS.find(e => t >= e.start_s && t <= e.end_s);
+    curve.push(err ? err.cents_error + (Math.random() - 0.5) * 18 : (Math.random() - 0.5) * 22);
+  }
+  return curve;
+}
+
+const DUMMY_CENTS_CURVE = generateDummyCentsCurve(300);
+
+// ── Cents deviation chart ─────────────────────────────────
+
+function CentsCurveChart({ data, duration, pitchErrors }: { data: number[]; duration: number; pitchErrors: PitchError[] }) {
+  const W = 800; const H = 120;
+  const mid = H / 2;
+  const scale = (mid - 8) / 200;
+  const threshYPos = mid - CENTS_THRESHOLD * scale;
+  const threshYNeg = mid + CENTS_THRESHOLD * scale;
+
+  const linePath = data.map((c, i) => {
+    const x = (i / (data.length - 1)) * W;
+    const y = mid - Math.max(-200, Math.min(200, c)) * scale;
+    return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+  }).join(' ');
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400 px-1">
+        <span>Playing too flat (below teacher)</span>
+        <span>Playing too sharp (above teacher)</span>
+      </div>
+      <div className="relative flex gap-3">
+        <div className="flex flex-col justify-between text-[10px] text-gray-600 dark:text-gray-400 py-1 flex-shrink-0 w-10 text-right">
+          <span>+200¢</span>
+          <span>0</span>
+          <span>-200¢</span>
+        </div>
+        <div className="flex-1">
+          <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded-lg bg-gray-50 dark:bg-gray-800/50" style={{ height: 120 }} preserveAspectRatio="none">
+            {/* Threshold fill bands */}
+            <rect x={0} y={0} width={W} height={threshYPos} fill="rgba(239,68,68,0.05)" />
+            <rect x={0} y={threshYNeg} width={W} height={H - threshYNeg} fill="rgba(59,130,246,0.05)" />
+            {/* Error columns */}
+            {pitchErrors.map((e, i) => (
+              <rect key={i}
+                x={(e.start_s / duration) * W}
+                width={((e.end_s - e.start_s) / duration) * W}
+                y={0} height={H}
+                fill={e.direction === 'sharp' ? 'rgba(239,68,68,0.18)' : 'rgba(59,130,246,0.18)'}
+              />
+            ))}
+            {/* Centre line */}
+            <line x1={0} y1={mid} x2={W} y2={mid} stroke="#9ca3af" strokeWidth={1} />
+            {/* Threshold lines */}
+            <line x1={0} y1={threshYPos} x2={W} y2={threshYPos} stroke="#ef4444" strokeWidth={1.2} strokeDasharray="6,4" opacity={0.7} />
+            <line x1={0} y1={threshYNeg} x2={W} y2={threshYNeg} stroke="#3b82f6" strokeWidth={1.2} strokeDasharray="6,4" opacity={0.7} />
+            {/* Curve */}
+            <path d={linePath} fill="none" stroke="#6b7280" strokeWidth={1.8} />
+          </svg>
+          <div className="flex justify-between text-[10px] text-gray-600 dark:text-gray-400 mt-1.5 px-0.5">
+            <span>0s</span>
+            <span>{(duration * 0.25).toFixed(0)}s</span>
+            <span>{(duration * 0.5).toFixed(0)}s</span>
+            <span>{(duration * 0.75).toFixed(0)}s</span>
+            <span>{duration}s</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Onset / timing chart ──────────────────────────────────
+
+function OnsetChart({ teacherOnsets, studentOnsets, errors, duration }: {
+  teacherOnsets: number[]; studentOnsets: number[]; errors: OnsetError[]; duration: number;
+}) {
+  const W = 800; const H = 80;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400 px-1">
+        <span>Each tick = one note being played</span>
+        <span>Red zones = you were off-time</span>
+      </div>
+      <div className="relative flex gap-3">
+        <div className="flex flex-col justify-around text-[10px] font-semibold flex-shrink-0 w-10 text-right">
+          <span className="text-blue-500">Teacher</span>
+          <span className="text-[#FF901F]">You</span>
+        </div>
+        <div className="flex-1">
+          <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded-lg bg-gray-50 dark:bg-gray-800/50" style={{ height: 80 }} preserveAspectRatio="none">
+            {/* Error regions */}
+            {errors.map((e, i) => {
+              const x1 = (Math.min(e.teacher_onset, e.student_onset) / duration) * W - 4;
+              const x2 = (Math.max(e.teacher_onset, e.student_onset) / duration) * W + 4;
+              return <rect key={i} x={x1} y={0} width={Math.max(x2 - x1, 8)} height={H} fill="rgba(239,68,68,0.15)" />;
+            })}
+            {/* Divider */}
+            <line x1={0} y1={H / 2} x2={W} y2={H / 2} stroke="#e5e7eb" strokeWidth={1} />
+            {/* Teacher onsets */}
+            {teacherOnsets.map((t, i) => (
+              <line key={i} x1={(t / duration) * W} y1={8} x2={(t / duration) * W} y2={H / 2 - 8} stroke="#3b82f6" strokeWidth={2.5} strokeLinecap="round" />
+            ))}
+            {/* Student onsets */}
+            {studentOnsets.map((t, i) => (
+              <line key={i} x1={(t / duration) * W} y1={H / 2 + 8} x2={(t / duration) * W} y2={H - 8} stroke="#FF901F" strokeWidth={2.5} strokeLinecap="round" />
+            ))}
+          </svg>
+          <div className="flex justify-between text-[10px] text-gray-600 dark:text-gray-400 mt-1.5 px-0.5">
+            <span>0s</span>
+            <span>{(duration * 0.25).toFixed(0)}s</span>
+            <span>{(duration * 0.5).toFixed(0)}s</span>
+            <span>{(duration * 0.75).toFixed(0)}s</span>
+            <span>{duration}s</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Score ring ────────────────────────────────────────────
+
+function ScoreRing({ score }: { score: number }) {
+  const r = 36; const circ = 2 * Math.PI * r;
+  const fill = (score / 100) * circ;
+  const color = score >= 80 ? '#22c55e' : score >= 60 ? '#f59e0b' : '#ef4444';
+  return (
+    <svg width={90} height={90} className="rotate-[-90deg]">
+      <circle cx={45} cy={45} r={r} fill="none" stroke="#e5e7eb" strokeWidth={8} />
+      <circle cx={45} cy={45} r={r} fill="none" stroke={color} strokeWidth={8}
+        strokeDasharray={`${fill} ${circ}`} strokeLinecap="round" />
+      <text x={45} y={45} textAnchor="middle" dominantBaseline="middle"
+        fill="currentColor" fontSize={16} fontWeight={700}
+        className="rotate-[90deg] origin-center fill-foreground"
+        style={{ transform: 'rotate(90deg)', transformOrigin: '45px 45px' }}>
+        {score}
+      </text>
+    </svg>
+  );
+}
+
+// ── Main component ─────────────────────────────────────────
+
 export default function AIRecordingScreen({ onNavigate }: AIRecordingScreenProps) {
-  // Generate demo waveform
-  const generateDemoWaveform = (numBars: number = 200) => {
-    return Array.from({ length: numBars }, () => Math.random() * 90 + 10);
-  };
+  const generateDemoWaveform = (n = 200) => Array.from({ length: n }, () => Math.random() * 90 + 10);
 
   const [step, setStep] = useState<'upload' | 'recording' | 'playback'>('upload');
-  const [teacherAudioFile, setTeacherAudioFile] = useState<File | null>(null);
   const [teacherAudioUrl, setTeacherAudioUrl] = useState<string | null>(null);
-  const [studentAudioUrl, setStudentAudioUrl] = useState<string | null>(null);
-
-  // Waveform data - initialize with demo data for testing
   const [teacherWaveform, setTeacherWaveform] = useState<number[]>([]);
   const [studentWaveform, setStudentWaveform] = useState<number[]>([]);
-
-  // Recording states
   const [isRecordingTeacher, setIsRecordingTeacher] = useState(false);
   const [isRecordingStudent, setIsRecordingStudent] = useState(false);
   const [hasStudentRecording, setHasStudentRecording] = useState(false);
-
-  // Playback states
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(20); // Demo duration
-  const [showMistakePopup, setShowMistakePopup] = useState(false);
-  const [currentMistake, setCurrentMistake] = useState<Mistake | null>(null);
-
-  // Demo mistakes data
-  const [mistakes] = useState<Mistake[]>([
-    { startTime: 3, endTime: 5, issue: 'Pitch slightly flat', suggestion: 'Focus on bow pressure and finger placement' },
-    { startTime: 9, endTime: 11, issue: 'Timing rushed', suggestion: 'Practice with metronome at slower tempo' },
-    { startTime: 15, endTime: 17, issue: 'Vibrato inconsistent', suggestion: 'Maintain steady wrist motion' }
-  ]);
+  const [duration, setDuration] = useState(DUMMY_DURATION);
+  const [activeTab, setActiveTab] = useState<'pitch' | 'timing'>('pitch');
 
   const teacherMediaRecorder = useRef<MediaRecorder | null>(null);
   const studentMediaRecorder = useRef<MediaRecorder | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playbackInterval = useRef<NodeJS.Timeout | null>(null);
 
-  // Generate waveform from audio file
-  const generateWaveform = async (audioFile: File): Promise<number[]> => {
-    return new Promise((resolve) => {
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+  const generateWaveform = async (file: File): Promise<number[]> =>
+    new Promise((resolve) => {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       const reader = new FileReader();
-
       reader.onload = async (e) => {
         try {
-          const arrayBuffer = e.target?.result as ArrayBuffer;
-          const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-          const rawData = audioBuffer.getChannelData(0);
+          const buf = await ctx.decodeAudioData(e.target?.result as ArrayBuffer);
+          const raw = buf.getChannelData(0);
           const samples = 200;
-          const blockSize = Math.floor(rawData.length / samples);
-          const waveformData: number[] = [];
-
-          for (let i = 0; i < samples; i++) {
-            let sum = 0;
-            for (let j = 0; j < blockSize; j++) {
-              sum += Math.abs(rawData[i * blockSize + j]);
-            }
-            waveformData.push(sum / blockSize);
-          }
-
-          const max = Math.max(...waveformData);
-          const normalized = waveformData.map(val => (val / max) * 100);
-          resolve(normalized);
-        } catch (err) {
-          console.error('Error generating waveform:', err);
-          resolve(generateDemoWaveform());
-        }
+          const block = Math.floor(raw.length / samples);
+          const data = Array.from({ length: samples }, (_, i) => {
+            let s = 0;
+            for (let j = 0; j < block; j++) s += Math.abs(raw[i * block + j]);
+            return s / block;
+          });
+          const max = Math.max(...data);
+          resolve(data.map(v => (v / max) * 100));
+        } catch { resolve(generateDemoWaveform()); }
       };
-
-      reader.readAsArrayBuffer(audioFile);
+      reader.readAsArrayBuffer(file);
     });
-  };
 
-  // Handle file upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setTeacherAudioFile(file);
-      const url = URL.createObjectURL(file);
-      setTeacherAudioUrl(url);
-
-      const waveform = await generateWaveform(file);
-      setTeacherWaveform(waveform);
-
-      const audio = new Audio(url);
-      audio.addEventListener('loadedmetadata', () => {
-        setDuration(audio.duration);
-      });
-
-      setStep('recording');
-    }
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    setTeacherAudioUrl(url);
+    setTeacherWaveform(await generateWaveform(file));
+    const audio = new Audio(url);
+    audio.addEventListener('loadedmetadata', () => setDuration(audio.duration));
+    setStep('recording');
   };
 
-  // Toggle teacher recording
   const toggleTeacherRecording = async () => {
-    if (isRecordingTeacher) {
-      teacherMediaRecorder.current?.stop();
-      setIsRecordingTeacher(false);
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mediaRecorder = new MediaRecorder(stream);
-        teacherMediaRecorder.current = mediaRecorder;
-        const chunks: BlobPart[] = [];
-
-        mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
-        mediaRecorder.onstop = async () => {
-          const blob = new Blob(chunks, { type: 'audio/webm' });
-          const file = new File([blob], 'teacher-recording.webm', { type: 'audio/webm' });
-          setTeacherAudioFile(file);
-          const url = URL.createObjectURL(blob);
-          setTeacherAudioUrl(url);
-
-          const waveform = await generateWaveform(file);
-          setTeacherWaveform(waveform);
-
-          const audio = new Audio(url);
-          audio.addEventListener('loadedmetadata', () => {
-            setDuration(audio.duration);
-          });
-
-          stream.getTracks().forEach(track => track.stop());
-          setStep('recording');
-        };
-
-        mediaRecorder.start();
-        setIsRecordingTeacher(true);
-      } catch (err) {
-        console.error('Error accessing microphone:', err);
-        alert('Could not access microphone. Please check permissions.');
-      }
-    }
+    if (isRecordingTeacher) { teacherMediaRecorder.current?.stop(); setIsRecordingTeacher(false); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      teacherMediaRecorder.current = mr;
+      const chunks: BlobPart[] = [];
+      mr.ondataavailable = (e) => chunks.push(e.data);
+      mr.onstop = async () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+        setTeacherAudioUrl(url);
+        setTeacherWaveform(await generateWaveform(new File([blob], 'teacher.webm', { type: 'audio/webm' })));
+        const audio = new Audio(url);
+        audio.addEventListener('loadedmetadata', () => setDuration(audio.duration));
+        stream.getTracks().forEach(t => t.stop());
+        setStep('recording');
+      };
+      mr.start(); setIsRecordingTeacher(true);
+    } catch { alert('Could not access microphone.'); }
   };
 
-  // Toggle student recording
   const toggleStudentRecording = async () => {
-    if (isRecordingStudent) {
-      studentMediaRecorder.current?.stop();
-      setIsRecordingStudent(false);
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mediaRecorder = new MediaRecorder(stream);
-        studentMediaRecorder.current = mediaRecorder;
-        const chunks: BlobPart[] = [];
-
-        mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
-        mediaRecorder.onstop = async () => {
-          const blob = new Blob(chunks, { type: 'audio/webm' });
-          const file = new File([blob], 'student-recording.webm', { type: 'audio/webm' });
-          const url = URL.createObjectURL(blob);
-          setStudentAudioUrl(url);
-
-          const waveform = await generateWaveform(file);
-          setStudentWaveform(waveform);
-
-          // Ensure both waveforms have the same length
-          if (waveform.length !== teacherWaveform.length) {
-            const targetLength = teacherWaveform.length;
-            const adjustedWaveform = Array.from({ length: targetLength }, (_, i) => {
-              const idx = Math.floor((i / targetLength) * waveform.length);
-              return waveform[idx] || 0;
-            });
-            setStudentWaveform(adjustedWaveform);
-          }
-
-          setHasStudentRecording(true);
-          stream.getTracks().forEach(track => track.stop());
-          setStep('playback');
-        };
-
-        mediaRecorder.start();
-        setIsRecordingStudent(true);
-      } catch (err) {
-        console.error('Error accessing microphone:', err);
-        alert('Could not access microphone. Please check permissions.');
-      }
-    }
+    if (isRecordingStudent) { studentMediaRecorder.current?.stop(); setIsRecordingStudent(false); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      studentMediaRecorder.current = mr;
+      const chunks: BlobPart[] = [];
+      mr.ondataavailable = (e) => chunks.push(e.data);
+      mr.onstop = async () => {
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const waveform = await generateWaveform(new File([blob], 'student.webm', { type: 'audio/webm' }));
+        const tLen = teacherWaveform.length;
+        setStudentWaveform(Array.from({ length: tLen }, (_, i) => waveform[Math.floor((i / tLen) * waveform.length)] || 0));
+        setHasStudentRecording(true);
+        stream.getTracks().forEach(t => t.stop());
+        setStep('playback');
+      };
+      mr.start(); setIsRecordingStudent(true);
+    } catch { alert('Could not access microphone.'); }
   };
 
-  // Playback controls
+  const loadDemoPlayback = () => {
+    setTeacherWaveform(generateDemoWaveform());
+    setStudentWaveform(generateDemoWaveform());
+    setHasStudentRecording(true);
+    setDuration(DUMMY_DURATION);
+    setStep('playback');
+  };
+
   const togglePlayback = () => {
     if (isPlaying) {
       setIsPlaying(false);
       audioRef.current?.pause();
-      if (playbackInterval.current) {
-        clearInterval(playbackInterval.current);
-      }
-    } else {
-      setIsPlaying(true);
-      if (!audioRef.current && teacherAudioUrl) {
-        audioRef.current = new Audio(teacherAudioUrl);
-      }
-      audioRef.current?.play();
-
-      playbackInterval.current = setInterval(() => {
-        if (audioRef.current) {
-          const time = audioRef.current.currentTime;
-          setCurrentTime(time);
-
-          // Check if we're in a mistake region
-          const mistake = mistakes.find(m => time >= m.startTime && time <= m.endTime);
-          if (mistake && !showMistakePopup) {
-            setCurrentMistake(mistake);
-            setShowMistakePopup(true);
-            audioRef.current.pause();
-            setIsPlaying(false);
-            if (playbackInterval.current) {
-              clearInterval(playbackInterval.current);
-            }
-          }
-
-          if (time >= duration) {
-            setIsPlaying(false);
-            setCurrentTime(0);
-            if (playbackInterval.current) {
-              clearInterval(playbackInterval.current);
-            }
-          }
-        }
-      }, 100);
+      if (playbackInterval.current) clearInterval(playbackInterval.current);
+      return;
     }
+    setIsPlaying(true);
+    if (!audioRef.current && teacherAudioUrl) audioRef.current = new Audio(teacherAudioUrl);
+    audioRef.current?.play();
+    playbackInterval.current = setInterval(() => {
+      if (audioRef.current) {
+        const t = audioRef.current.currentTime;
+        setCurrentTime(t);
+        if (t >= duration) { setIsPlaying(false); setCurrentTime(0); clearInterval(playbackInterval.current!); }
+      } else {
+        setCurrentTime(prev => {
+          if (prev >= duration) { setIsPlaying(false); clearInterval(playbackInterval.current!); return 0; }
+          return prev + 0.1;
+        });
+      }
+    }, 100);
   };
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const percentage = x / rect.width;
-    const newTime = percentage * duration;
-    setCurrentTime(newTime);
-    if (audioRef.current) {
-      audioRef.current.currentTime = newTime;
-    }
+    const t = ((e.clientX - rect.left) / rect.width) * duration;
+    setCurrentTime(t);
+    if (audioRef.current) audioRef.current.currentTime = t;
   };
 
-  const closeMistakePopup = () => {
-    setShowMistakePopup(false);
-    setCurrentMistake(null);
+  const resetAll = () => {
+    setStep('upload');
+    setTeacherAudioUrl(null);
+    setTeacherWaveform([]); setStudentWaveform([]);
+    setHasStudentRecording(false);
+    setCurrentTime(0); setIsPlaying(false);
+    if (playbackInterval.current) clearInterval(playbackInterval.current);
+    audioRef.current = null;
   };
 
-  const reRecordMistake = () => {
-    setShowMistakePopup(false);
-    setCurrentMistake(null);
-    // In production, this would allow re-recording just that section
-    toggleStudentRecording();
-  };
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  const totalErrors = DUMMY_PITCH_ERRORS.length + DUMMY_ONSET_ERRORS.length;
+  const score = Math.max(0, Math.round(100 - totalErrors * 7 - DUMMY_PITCH_ERRORS.reduce((a, e) => a + Math.abs(e.cents_error) * 0.05, 0)));
 
-  // Generate timeline markers
-  const getTimelineMarkers = () => {
-    const markers = [];
-    const interval = duration > 60 ? 10 : 5;
-    for (let i = 0; i <= duration; i += interval) {
-      markers.push(i);
-    }
-    return markers;
-  };
+  // ── RENDER ────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-background pb-20 lg:pb-8">
+    <div className="min-h-screen bg-white dark:bg-gray-950 pb-24 lg:pb-8">
+
       {/* Header */}
-      <div className="bg-gradient-to-br from-purple-50 via-white to-orange-50 dark:from-purple-950/20 dark:via-background dark:to-orange-950/20 border-b border-border px-4 sm:px-6 pt-6 sm:pt-8 pb-4 sm:pb-6">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-2xl sm:text-3xl font-bold text-foreground">Recording Analyzer</h1>
-          <p className="text-sm text-muted-foreground mt-1">Compare your playing with teacher recordings</p>
+      <div className="bg-gradient-to-br from-orange-50 to-white dark:from-gray-900 dark:to-gray-950 border-b border-gray-200 dark:border-gray-800 px-6 pt-8 pb-6">
+        <div className="max-w-6xl mx-auto">
+          <h1 className="text-3xl text-black dark:text-white font-bold">Practice Coach</h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-2">Record yourself, compare with your teacher, and see exactly what to fix.</p>
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Step 1: Upload/Record Teacher Audio */}
+      <div className="max-w-6xl mx-auto px-6 py-6">
+
+        {/* ── STEP 1: Load teacher reference ── */}
         {step === 'upload' && (
-          <Card className="border-2 border-dashed border-primary/30 bg-card">
-            <CardContent className="p-4 sm:p-6 space-y-4">
-              <div className="text-center mb-4">
-                <h2 className="text-base sm:text-lg font-semibold text-foreground mb-2">Teacher's Reference Recording</h2>
-                <p className="text-xs sm:text-sm text-muted-foreground">
-                  Upload or record your teacher's reference to begin
-                </p>
-              </div>
+          <div className="max-w-lg mx-auto space-y-6">
+            {/* How it works */}
+            <div className="grid grid-cols-3 gap-4 text-center">
+              {[
+                { n: '1', label: 'Load teacher\'s recording' },
+                { n: '2', label: 'Record yourself playing' },
+                { n: '3', label: 'See your mistakes' },
+              ].map(item => (
+                <div key={item.n} className="flex flex-col items-center gap-2">
+                  <div className="w-9 h-9 rounded-full bg-orange-50 dark:bg-orange-950/20 text-[#FF901F] font-bold text-sm flex items-center justify-center">{item.n}</div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 leading-snug">{item.label}</p>
+                </div>
+              ))}
+            </div>
 
-              {/* Upload Button */}
-              <label className="block">
-                <input
-                  type="file"
-                  accept="audio/*"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                  id="teacher-upload"
-                />
-                <Button
-                  variant="outline"
-                  className="w-full h-20 sm:h-24 border-2 border-dashed hover:border-primary hover:bg-accent transition-colors"
-                  onClick={() => document.getElementById('teacher-upload')?.click()}
-                  type="button"
-                >
-                  <div className="flex flex-col items-center gap-1.5 sm:gap-2">
-                    <Upload size={20} className="text-primary sm:w-6 sm:h-6" />
-                    <span className="text-sm sm:text-base">Upload Audio File</span>
-                    <span className="text-xs text-muted-foreground">MP3, WAV, or M4A</span>
+            <Card className="bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 shadow-sm">
+              <CardContent className="p-6 space-y-5">
+                <div>
+                  <h2 className="text-base font-semibold text-black dark:text-white">Step 1 — Load your teacher's recording</h2>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">This is the reference you'll be compared against. You can upload a saved file or record directly.</p>
+                </div>
+
+                <label className="block">
+                  <input type="file" accept="audio/*" onChange={handleFileUpload} className="hidden" id="teacher-upload" />
+                  <div
+                    onClick={() => document.getElementById('teacher-upload')?.click()}
+                    className="flex flex-col items-center justify-center gap-3 h-28 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-800 hover:border-[#FF901F]/50 hover:bg-orange-50 dark:hover:bg-gray-800 cursor-pointer transition-all"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                      <Upload size={18} className="text-gray-600 dark:text-gray-400" />
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm font-medium text-black dark:text-white">Upload a recording</p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">MP3, WAV, or M4A</p>
+                    </div>
                   </div>
-                </Button>
-              </label>
+                </label>
 
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-border" />
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-px bg-border" />
+                  <span className="text-xs text-gray-600 dark:text-gray-400 uppercase tracking-wide">or record now</span>
+                  <div className="flex-1 h-px bg-border" />
                 </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-card px-2 text-muted-foreground">Or</span>
-                </div>
-              </div>
 
-              {/* Record Button */}
-              <Button
-                onClick={toggleTeacherRecording}
-                className={`w-full h-20 sm:h-24 ${
-                  isRecordingTeacher
-                    ? 'bg-red-500 hover:bg-red-600'
-                    : 'bg-primary hover:bg-primary/90'
-                }`}
-              >
-                <div className="flex flex-col items-center gap-1.5 sm:gap-2">
+                <Button
+                  onClick={toggleTeacherRecording}
+                  className={`w-full h-14 text-base font-medium ${isRecordingTeacher ? 'bg-red-500 hover:bg-red-600' : 'bg-[#FF901F] hover:bg-[#E67F0C]'}`}
+                >
                   {isRecordingTeacher ? (
-                    <>
-                      <Square size={20} className="fill-white sm:w-6 sm:h-6" />
-                      <span className="text-sm sm:text-base">Stop Recording</span>
-                      <span className="text-xs opacity-90 animate-pulse">Recording...</span>
-                    </>
+                    <><Square size={18} className="mr-2 fill-white" />Stop recording</>
                   ) : (
-                    <>
-                      <Mic size={20} className="sm:w-6 sm:h-6" />
-                      <span className="text-sm sm:text-base">Record Now</span>
-                      <span className="text-xs opacity-90">Tap to start recording</span>
-                    </>
+                    <><Mic size={18} className="mr-2" />Record teacher</>
                   )}
-                </div>
-              </Button>
-            </CardContent>
-          </Card>
+                </Button>
+                {isRecordingTeacher && (
+                  <p className="text-center text-sm text-red-500 animate-pulse">Recording in progress…</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <button onClick={loadDemoPlayback} className="w-full text-center text-sm text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white transition-colors underline underline-offset-4">
+              Skip to demo — see what the analysis looks like
+            </button>
+          </div>
         )}
 
-        {/* Step 2: Record Student Audio */}
+        {/* ── STEP 2: Record yourself ── */}
         {step === 'recording' && !hasStudentRecording && (
-          <Card className="bg-card">
-            <CardContent className="p-4 sm:p-6 space-y-6">
-              {/* Teacher Waveform Preview */}
-              <div>
-                <h3 className="text-xs sm:text-sm font-medium text-muted-foreground mb-3">Teacher's Recording</h3>
-                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 h-24 flex items-end gap-0.5 overflow-x-auto">
-                  {teacherWaveform.length > 0 ? (
-                    teacherWaveform.map((height, i) => (
-                      <div
-                        key={i}
-                        className="w-1 bg-gradient-to-t from-[#FF901F]/60 to-orange-400/60 rounded-t flex-shrink-0"
-                        style={{ height: `${Math.max(height, 10)}%` }}
-                      />
-                    ))
-                  ) : (
-                    <div className="w-full flex items-center justify-center h-full text-muted-foreground text-sm">
-                      Generating waveform...
+          <div className="max-w-lg mx-auto space-y-6">
+            <Card className="bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 shadow-sm">
+              <CardContent className="p-6 space-y-5">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-5 h-5 rounded-full bg-green-100 dark:bg-green-950/50 flex items-center justify-center">
+                      <div className="w-2 h-2 rounded-full bg-green-500" />
                     </div>
-                  )}
+                    <span className="text-xs font-medium text-green-600 dark:text-green-400">Teacher recording loaded</span>
+                  </div>
+                  <h2 className="text-base font-semibold text-black dark:text-white">Step 2 — Now record yourself</h2>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Play the same piece from the beginning. Try to match the tempo and notes as closely as you can.</p>
                 </div>
-              </div>
 
-              {/* Student Recording Section */}
-              <div className="text-center py-6 sm:py-8">
-                <h2 className="text-base sm:text-lg font-semibold text-foreground mb-2">Record Your Performance</h2>
-                <p className="text-xs sm:text-sm text-muted-foreground mb-6">
-                  Now play the same piece and record yourself
-                </p>
+                {/* Teacher waveform preview */}
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Teacher's recording</p>
+                  <div className="h-16 rounded-lg bg-gray-100 dark:bg-gray-800 flex items-end gap-px px-2 pb-2 overflow-hidden">
+                    {teacherWaveform.map((h, i) => (
+                      <div key={i} className="flex-1 bg-orange-400/60 rounded-t-sm min-w-[1px]" style={{ height: `${Math.max(h, 8)}%` }} />
+                    ))}
+                  </div>
+                </div>
+
                 <Button
                   onClick={toggleStudentRecording}
                   size="lg"
-                  className={`${
-                    isRecordingStudent
-                      ? 'bg-red-500 hover:bg-red-600'
-                      : 'bg-gradient-to-r from-purple-500 to-[#FF901F]'
-                  } text-white px-6 sm:px-8 w-full sm:w-auto`}
+                  className={`w-full h-14 text-base font-medium ${isRecordingStudent ? 'bg-red-500 hover:bg-red-600' : 'bg-gradient-to-r from-purple-500 to-[#FF901F]'} text-white`}
                 >
                   {isRecordingStudent ? (
-                    <>
-                      <Square size={18} className="mr-2 fill-white sm:w-5 sm:h-5" />
-                      <span className="text-sm sm:text-base">Stop Recording</span>
-                    </>
+                    <><Square size={18} className="mr-2 fill-white" />Stop recording</>
                   ) : (
-                    <>
-                      <Mic size={18} className="mr-2 sm:w-5 sm:h-5" />
-                      <span className="text-sm sm:text-base">Start Recording</span>
-                    </>
+                    <><Mic size={18} className="mr-2" />Start recording yourself</>
                   )}
                 </Button>
                 {isRecordingStudent && (
-                  <p className="text-xs sm:text-sm text-red-500 mt-4 animate-pulse">Recording in progress...</p>
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                    <p className="text-sm text-red-500">Recording in progress…</p>
+                  </div>
                 )}
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         )}
 
-        {/* Step 3: Playback with Overlapped Waveforms */}
+        {/* ── STEP 3: Analysis ── */}
         {step === 'playback' && hasStudentRecording && (
-          <Card className="bg-card">
-            <CardContent className="p-4 sm:p-6 space-y-6">
-              <div>
-                <div className="flex items-center justify-between mb-4 gap-3">
-                  <h2 className="text-base sm:text-lg font-semibold text-foreground">Recording Analysis</h2>
-                  <div className="text-xs sm:text-sm">
-                    <span className="text-red-500 font-medium whitespace-nowrap">{mistakes.length} mistakes</span>
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6 items-start">
+
+            {/* ── LEFT COLUMN: score + player + actions ── */}
+            <div className="space-y-6">
+
+            {/* Score summary */}
+            <Card className="bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
+              <CardContent className="p-6">
+                <div className="flex items-center gap-6">
+                  <ScoreRing score={score} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Your score</p>
+                    <h2 className="text-xl font-bold text-black dark:text-white">
+                      {score >= 80 ? 'Great playing!' : score >= 60 ? 'Good effort!' : 'Keep practicing!'}
+                    </h2>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                      {score >= 80
+                        ? 'Only minor issues — you\'re close to matching your teacher.'
+                        : score >= 60
+                        ? 'A few areas to focus on. Check the errors below.'
+                        : 'Several spots need work. Review each error below.'}
+                    </p>
                   </div>
                 </div>
+                <div className="flex gap-3 mt-5">
+                  <div className="flex-1 flex items-center gap-2.5 bg-red-50 dark:bg-red-950/30 rounded-xl px-4 py-3">
+                    <Music size={16} className="text-red-500 flex-shrink-0" />
+                    <div>
+                      <p className="text-lg font-bold text-red-600 dark:text-red-400 leading-none">{DUMMY_PITCH_ERRORS.length}</p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Pitch errors</p>
+                    </div>
+                  </div>
+                  <div className="flex-1 flex items-center gap-2.5 bg-amber-50 dark:bg-amber-950/30 rounded-xl px-4 py-3">
+                    <Clock size={16} className="text-amber-500 flex-shrink-0" />
+                    <div>
+                      <p className="text-lg font-bold text-amber-600 dark:text-amber-400 leading-none">{DUMMY_ONSET_ERRORS.length}</p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Timing errors</p>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-                {/* Overlapped Waveform Display */}
-                <div className="bg-white dark:bg-gray-900 rounded-xl border border-border overflow-hidden">
-                  {/* Waveform Container */}
-                  <div className="relative bg-gray-50 dark:bg-gray-800/50 p-3 sm:p-6 pb-3">
-                    {/* Timeline at top */}
-                    <div className="flex justify-between mb-2 px-1 text-[10px] sm:text-xs">
-                      {getTimelineMarkers().map((time, i) => (
-                        <span key={i} className="text-muted-foreground">
-                          {formatTime(time)}
-                        </span>
-                      ))}
+            {/* Waveform player */}
+            <Card className="bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 shadow-sm">
+              <CardContent className="p-6 space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-black dark:text-white">Recording comparison</h3>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Orange = teacher &nbsp;·&nbsp; Purple = you &nbsp;·&nbsp; Red zones = pitch errors &nbsp;·&nbsp; Yellow zones = timing errors</p>
+                </div>
+
+                {/* Waveform — SVG-based for reliable rendering */}
+                {(() => {
+                  const W = 800; const H = 120; const mid = H / 2;
+                  const n = teacherWaveform.length;
+                  return (
+                    <div className="relative rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+                      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 120 }} preserveAspectRatio="none">
+                        {/* Error zone overlays */}
+                        {DUMMY_PITCH_ERRORS.map((e, i) => (
+                          <rect key={`pe-${i}`} x={(e.start_s / duration) * W} width={((e.end_s - e.start_s) / duration) * W} y={0} height={H} fill="rgba(239,68,68,0.15)" />
+                        ))}
+                        {DUMMY_ONSET_ERRORS.map((e, i) => (
+                          <rect key={`oe-${i}`}
+                            x={(Math.min(e.teacher_onset, e.student_onset) / duration) * W - 2}
+                            width={Math.abs(e.student_onset - e.teacher_onset) / duration * W + 4}
+                            y={0} height={H} fill="rgba(245,158,11,0.15)"
+                          />
+                        ))}
+                        {/* Centre divider */}
+                        <line x1={0} y1={mid} x2={W} y2={mid} stroke="#d1d5db" strokeWidth={1} />
+                        {/* Teacher waveform — top half, orange */}
+                        {teacherWaveform.map((h, i) => {
+                          const x = (i / n) * W;
+                          const barH = Math.max((h / 100) * (mid - 4), 2);
+                          const t = (i / n) * duration;
+                          const isPitch = DUMMY_PITCH_ERRORS.some(e => t >= e.start_s && t <= e.end_s);
+                          const isTiming = DUMMY_ONSET_ERRORS.some(e => t >= Math.min(e.teacher_onset, e.student_onset) - 0.1 && t <= Math.max(e.teacher_onset, e.student_onset) + 0.1);
+                          return <rect key={`t-${i}`} x={x} y={mid - barH} width={Math.max(W / n - 0.5, 1)} height={barH} fill={isPitch ? '#f87171' : isTiming ? '#fbbf24' : '#fb923c'} opacity={0.85} />;
+                        })}
+                        {/* Student waveform — bottom half, purple */}
+                        {studentWaveform.map((h, i) => {
+                          const x = (i / n) * W;
+                          const barH = Math.max((h / 100) * (mid - 4), 2);
+                          const t = (i / n) * duration;
+                          const isPitch = DUMMY_PITCH_ERRORS.some(e => t >= e.start_s && t <= e.end_s);
+                          const isTiming = DUMMY_ONSET_ERRORS.some(e => t >= Math.min(e.teacher_onset, e.student_onset) - 0.1 && t <= Math.max(e.teacher_onset, e.student_onset) + 0.1);
+                          return <rect key={`s-${i}`} x={x} y={mid} width={Math.max(W / n - 0.5, 1)} height={barH} fill={isPitch ? '#dc2626' : isTiming ? '#d97706' : '#7c3aed'} opacity={0.75} />;
+                        })}
+                        {/* Playhead */}
+                        <line x1={(currentTime / duration) * W} y1={0} x2={(currentTime / duration) * W} y2={H} stroke="#111827" strokeWidth={1.5} />
+                        <circle cx={(currentTime / duration) * W} cy={4} r={4} fill="#111827" />
+                      </svg>
+                    </div>
+                  );
+                })()}
+
+                {/* Scrubber */}
+                <div className="h-8 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 cursor-pointer relative overflow-hidden" onClick={handleSeek}>
+                  {DUMMY_PITCH_ERRORS.map((e, i) => (
+                    <div key={i} className="absolute top-0 bottom-0 bg-red-400/50" style={{ left: `${(e.start_s / duration) * 100}%`, width: `${((e.end_s - e.start_s) / duration) * 100}%` }} />
+                  ))}
+                  {DUMMY_ONSET_ERRORS.map((e, i) => (
+                    <div key={i} className="absolute top-0 bottom-0 bg-amber-400/50" style={{
+                      left: `${(Math.min(e.teacher_onset, e.student_onset) / duration) * 100}%`,
+                      width: `${(Math.abs(e.student_onset - e.teacher_onset) / duration) * 100 + 0.5}%`,
+                    }} />
+                  ))}
+                  <div className="absolute top-0 bottom-0 w-1 bg-gray-800 dark:bg-gray-200 pointer-events-none" style={{ left: `${(currentTime / duration) * 100}%` }} />
+                </div>
+
+                {/* Time + Play button */}
+                <div className="flex justify-between text-xs font-mono text-gray-500 dark:text-gray-400 px-0.5">
+                  <span>{fmt(currentTime)}</span>
+                  <span>{fmt(duration)}</span>
+                </div>
+                <Button onClick={togglePlayback} className="w-full h-12 bg-gradient-to-r from-purple-500 to-[#FF901F] text-white text-sm font-medium">
+                  {isPlaying ? <><Pause size={16} className="mr-2" />Pause</> : <><Play size={16} className="mr-2" />Play recording</>}
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Actions */}
+            <div className="flex gap-3">
+              <Button onClick={resetAll} variant="outline" className="flex-1 h-11">New analysis</Button>
+              <Button
+                onClick={() => {
+                  setStep('recording');
+                  setHasStudentRecording(false);
+                  setStudentWaveform([]);
+                  setCurrentTime(0); setIsPlaying(false);
+                  if (playbackInterval.current) clearInterval(playbackInterval.current);
+                  audioRef.current = null;
+                }}
+                className="flex-1 h-11 bg-gradient-to-r from-purple-500 to-[#FF901F] text-white"
+              >
+                Try again
+              </Button>
+            </div>
+
+            </div>{/* end left column */}
+
+            {/* ── RIGHT COLUMN: error breakdown ── */}
+            <div className="lg:sticky lg:top-6">
+            {/* Error breakdown */}
+            <Card className="bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 shadow-sm">
+              <CardContent className="p-6 space-y-5">
+                <div>
+                  <h3 className="text-sm font-semibold text-black dark:text-white">Error breakdown</h3>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Tap any error to jump to that moment in the recording.</p>
+                </div>
+
+                {/* Tabs */}
+                <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1">
+                  <button
+                    onClick={() => setActiveTab('pitch')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'pitch' ? 'bg-white dark:bg-gray-900 text-black dark:text-white shadow-sm' : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-white'}`}
+                  >
+                    <Music size={14} />Pitch
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('timing')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'timing' ? 'bg-white dark:bg-gray-900 text-black dark:text-white shadow-sm' : 'text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-white'}`}
+                  >
+                    <Clock size={14} />Timing
+                  </button>
+                </div>
+
+                {/* PITCH TAB */}
+                {activeTab === 'pitch' && (
+                  <div className="space-y-5">
+                    <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 space-y-1">
+                      <p className="text-xs font-semibold text-black dark:text-white">What am I looking at?</p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+                        This chart shows how far in tune you were versus your teacher at each moment.
+                        The grey line is your pitch — when it drifts past the <span className="text-red-500 font-medium">red dashed line</span> you're playing sharp (too high),
+                        and past the <span className="text-blue-500 font-medium">blue dashed line</span> you're playing flat (too low).
+                      </p>
                     </div>
 
-                    {/* Main Waveform - Overlapped */}
-                    <div className="relative h-32 sm:h-48 mb-3 overflow-hidden">
-                      <div className="absolute inset-0">
-                        <div className="h-full flex items-center gap-px">
-                          {teacherWaveform.length > 0 && studentWaveform.length > 0 ? (
-                            teacherWaveform.map((height, i) => {
-                              const studentHeight = studentWaveform[i] || 0;
-                              const time = (i / teacherWaveform.length) * duration;
-                              const isInMistake = mistakes.some(m => time >= m.startTime && time <= m.endTime);
+                    <CentsCurveChart data={DUMMY_CENTS_CURVE} duration={duration} pitchErrors={DUMMY_PITCH_ERRORS} />
 
-                              return (
-                                <div key={i} className="flex-1 flex flex-col items-center justify-center gap-px h-full min-w-[2px]">
-                                  {/* Teacher waveform (orange, top) */}
-                                  <div
-                                    className={`w-full ${isInMistake ? 'bg-red-400' : 'bg-gradient-to-t from-[#FF901F] to-orange-400'} transition-all rounded-t-sm`}
-                                    style={{ height: `${Math.max(height, 5)}%` }}
-                                  />
-                                  {/* Student waveform (purple, bottom) */}
-                                  <div
-                                    className={`w-full ${isInMistake ? 'bg-red-600' : 'bg-gradient-to-b from-purple-600 to-purple-400'} transition-all rounded-b-sm`}
-                                    style={{ height: `${Math.max(studentHeight, 5)}%` }}
-                                  />
-                                </div>
-                              );
-                            })
-                          ) : (
-                            <div className="w-full flex items-center justify-center h-full text-muted-foreground text-sm">
-                              Loading waveforms...
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                    <div className="flex flex-wrap gap-4 text-xs text-gray-600 dark:text-gray-400">
+                      <span className="flex items-center gap-1.5"><span className="w-6 border-t-2 border-dashed border-red-400 inline-block" /> Sharp — too high</span>
+                      <span className="flex items-center gap-1.5"><span className="w-6 border-t-2 border-dashed border-blue-400 inline-block" /> Flat — too low</span>
+                    </div>
 
-                      {/* Current time indicator */}
-                      {teacherWaveform.length > 0 && (
-                        <div
-                          className="absolute top-0 bottom-0 w-0.5 bg-foreground z-10 transition-all pointer-events-none"
-                          style={{ left: `${(currentTime / duration) * 100}%` }}
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-black dark:text-white">Individual errors</p>
+                      {DUMMY_PITCH_ERRORS.map((e, i) => (
+                        <button key={i} onClick={() => setCurrentTime(e.start_s)}
+                          className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left"
                         >
-                          <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 sm:w-3 sm:h-3 bg-foreground rounded-full" />
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Scrubber bar */}
-                    <div
-                      className="h-10 sm:h-12 bg-gray-100 dark:bg-gray-700 rounded-lg cursor-pointer relative overflow-hidden touch-manipulation"
-                      onClick={handleSeek}
-                    >
-                      {/* Mistake indicators on scrubber */}
-                      {mistakes.map((mistake, i) => (
-                        <div
-                          key={i}
-                          className="absolute top-0 bottom-0 bg-red-500/40"
-                          style={{
-                            left: `${(mistake.startTime / duration) * 100}%`,
-                            width: `${((mistake.endTime - mistake.startTime) / duration) * 100}%`
-                          }}
-                        />
+                          <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${e.direction === 'sharp' ? 'bg-red-100 dark:bg-red-950/50' : 'bg-blue-100 dark:bg-blue-950/50'}`}>
+                            {e.direction === 'sharp' ? <TrendingUp size={16} className="text-red-500" /> : <TrendingDown size={16} className="text-blue-500" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-semibold text-black dark:text-white">{e.direction === 'sharp' ? 'Too sharp' : 'Too flat'} on {e.teacher_swara}</span>
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-mono font-semibold ${e.direction === 'sharp' ? 'bg-red-100 dark:bg-red-950/50 text-red-600 dark:text-red-400' : 'bg-blue-100 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400'}`}>
+                                {e.cents_error > 0 ? '+' : ''}{e.cents_error}¢
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">{fmt(e.start_s)} – {fmt(e.end_s)} · {e.duration_s.toFixed(1)}s</p>
+                          </div>
+                          <ChevronRight size={14} className="text-gray-600 dark:text-gray-400 flex-shrink-0" />
+                        </button>
                       ))}
-
-                      {/* Waveform preview on scrubber */}
-                      {teacherWaveform.length > 0 && (
-                        <div className="absolute inset-0 flex items-center gap-px px-1">
-                          {teacherWaveform.map((height, i) => (
-                            <div
-                              key={i}
-                              className="flex-1 bg-gray-300 dark:bg-gray-600 rounded-full min-w-[1px]"
-                              style={{ height: `${Math.max(height * 0.3, 20)}%` }}
-                            />
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Current position on scrubber */}
-                      <div
-                        className="absolute top-0 bottom-0 w-0.5 sm:w-1 bg-foreground pointer-events-none"
-                        style={{ left: `${(currentTime / duration) * 100}%` }}
-                      />
-                    </div>
-
-                    {/* Time display */}
-                    <div className="flex justify-between items-center mt-3 px-1">
-                      <span className="text-sm font-mono text-foreground">{formatTime(currentTime)}</span>
-                      <span className="text-sm font-mono text-muted-foreground">{formatTime(duration)}</span>
                     </div>
                   </div>
+                )}
 
-                  {/* Playback Controls */}
-                  <div className="p-3 sm:p-4 bg-card border-t border-border">
-                    <div className="flex items-center justify-center gap-4">
-                      <Button
-                        onClick={togglePlayback}
-                        size="lg"
-                        className="bg-gradient-to-r from-purple-500 to-[#FF901F] text-white px-6 sm:px-8 w-full sm:w-auto"
-                      >
-                        {isPlaying ? (
-                          <>
-                            <Pause size={18} className="mr-2 sm:w-5 sm:h-5" />
-                            <span className="text-sm sm:text-base">Pause</span>
-                          </>
-                        ) : (
-                          <>
-                            <Play size={18} className="mr-2 sm:w-5 sm:h-5" />
-                            <span className="text-sm sm:text-base">Play</span>
-                          </>
-                        )}
-                      </Button>
+                {/* TIMING TAB */}
+                {activeTab === 'timing' && (
+                  <div className="space-y-5">
+                    <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 space-y-1">
+                      <p className="text-xs font-semibold text-black dark:text-white">What am I looking at?</p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+                        Each vertical tick is a note being played.
+                        <span className="text-blue-500 font-medium"> Blue ticks</span> are the teacher's notes,
+                        <span className="text-[#FF901F] font-medium"> orange ticks</span> are yours.
+                        When they don't line up (red zones), you were rushing or falling behind.
+                      </p>
+                    </div>
+
+                    <OnsetChart teacherOnsets={TEACHER_ONSETS} studentOnsets={STUDENT_ONSETS} errors={DUMMY_ONSET_ERRORS} duration={duration} />
+
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-black dark:text-white">Individual errors</p>
+                      {DUMMY_ONSET_ERRORS.map((e, i) => (
+                        <button key={i} onClick={() => setCurrentTime(e.teacher_onset)}
+                          className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left"
+                        >
+                          <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-amber-100 dark:bg-amber-950/50">
+                            {e.direction === 'LATE' ? <TrendingDown size={16} className="text-amber-500" /> : <TrendingUp size={16} className="text-amber-500" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-semibold text-black dark:text-white">{e.direction === 'LATE' ? 'Came in late' : 'Came in early'}</span>
+                              <span className="text-xs px-2 py-0.5 rounded-full font-mono font-semibold bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300">
+                                {Math.abs(e.diff_ms)}ms off
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">Note at {e.teacher_onset.toFixed(2)}s · you played at {e.student_onset.toFixed(2)}s</p>
+                          </div>
+                          <ChevronRight size={14} className="text-gray-600 dark:text-gray-400 flex-shrink-0" />
+                        </button>
+                      ))}
                     </div>
                   </div>
-                </div>
+                )}
+              </CardContent>
+            </Card>
+            </div>{/* end right column */}
 
-                {/* Legend */}
-                <div className="flex items-center justify-center gap-3 sm:gap-6 mt-4 flex-wrap">
-                  <div className="flex items-center gap-1.5 sm:gap-2">
-                    <div className="w-3 h-3 sm:w-4 sm:h-4 bg-gradient-to-t from-[#FF901F] to-orange-400 rounded" />
-                    <span className="text-xs text-muted-foreground">Teacher</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 sm:gap-2">
-                    <div className="w-3 h-3 sm:w-4 sm:h-4 bg-gradient-to-t from-purple-600 to-purple-400 rounded" />
-                    <span className="text-xs text-muted-foreground">You</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 sm:gap-2">
-                    <div className="w-3 h-3 sm:w-4 sm:h-4 bg-red-500 rounded" />
-                    <span className="text-xs text-muted-foreground">Mistake</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row gap-3 pt-4">
-                <Button
-                  onClick={() => {
-                    setStep('upload');
-                    setTeacherAudioFile(null);
-                    setTeacherAudioUrl(null);
-                    setStudentAudioUrl(null);
-                    setTeacherWaveform([]);
-                    setStudentWaveform([]);
-                    setHasStudentRecording(false);
-                    setCurrentTime(0);
-                  }}
-                  variant="outline"
-                  className="flex-1 w-full"
-                >
-                  New Analysis
-                </Button>
-                <Button
-                  onClick={() => {
-                    setStep('recording');
-                    setHasStudentRecording(false);
-                    setStudentAudioUrl(null);
-                    setStudentWaveform([]);
-                    setCurrentTime(0);
-                  }}
-                  className="flex-1 w-full bg-gradient-to-r from-purple-500 to-[#FF901F] text-white"
-                >
-                  Record Again
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          </div>
         )}
       </div>
-
-      {/* Mistake Popup */}
-      {showMistakePopup && currentMistake && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="max-w-md w-full bg-card mx-4">
-            <CardContent className="p-4 sm:p-6 space-y-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse flex-shrink-0" />
-                    <h3 className="text-base sm:text-lg font-semibold text-foreground">Mistake Detected</h3>
-                  </div>
-                  <p className="text-sm text-foreground font-medium mb-2">{currentMistake.issue}</p>
-                  <p className="text-xs sm:text-sm text-muted-foreground">{currentMistake.suggestion}</p>
-                </div>
-                <button
-                  onClick={closeMistakePopup}
-                  className="text-muted-foreground hover:text-foreground flex-shrink-0"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                <Button
-                  onClick={closeMistakePopup}
-                  variant="outline"
-                  className="flex-1 w-full"
-                >
-                  Continue
-                </Button>
-                <Button
-                  onClick={reRecordMistake}
-                  className="flex-1 w-full bg-red-500 hover:bg-red-600 text-white"
-                >
-                  <Mic size={16} className="mr-2" />
-                  Re-record
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }

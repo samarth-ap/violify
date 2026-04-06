@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Home, Play, BookOpen, User } from 'lucide-react';
+import { Home, Play, BookOpen, User, Mic } from 'lucide-react';
 import OnboardingScreen from './components/OnboardingScreen';
 import LoginScreen from './components/LoginScreen';
 import SignUpScreen from './components/SignUpScreen';
@@ -11,12 +11,13 @@ import RepetitionCounterScreen from './components/RepetitionCounterScreen';
 import PerformanceReportScreen from './components/PerformanceReportScreen';
 import SettingsScreen from './components/SettingsScreen';
 import AnalyticsScreen from './components/AnalyticsScreen';
+import AIRecordingScreen from './components/AIRecordingScreen';
 import { DarkModeProvider } from './components/DarkModeContext';
 import { AuthProvider, useAuth } from './components/AuthContext';
 import OnboardingTutorial from './components/OnboardingTutorial';
 import logoImage from './assets/violify-logo.jpeg';
 
-type Screen = 'onboarding' | 'login' | 'signup' | 'home' | 'practice' | 'repetition' | 'report' | 'lessons' | 'lesson-detail' | 'settings' | 'analytics';
+type Screen = 'onboarding' | 'login' | 'signup' | 'home' | 'practice' | 'repetition' | 'report' | 'lessons' | 'lesson-detail' | 'settings' | 'analytics' | 'coach';
 
 function AppContent() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('onboarding');
@@ -116,6 +117,8 @@ function AppContent() {
         />;
       case 'analytics':
         return <AnalyticsScreen onNavigate={navigate} />;
+      case 'coach':
+        return <AIRecordingScreen onNavigate={navigate} />;
       default:
         return <HomeScreen onNavigate={navigate} />;
     }
@@ -124,6 +127,7 @@ function AppContent() {
   const navItems = [
     { id: 'home' as Screen, icon: Home, label: 'Home', elementId: 'home-tab' },
     { id: 'practice' as Screen, icon: Play, label: 'Practice', elementId: 'practice-tab' },
+    { id: 'coach' as Screen, icon: Mic, label: 'Coach', elementId: 'coach-tab' },
     { id: 'lessons' as Screen, icon: BookOpen, label: 'Lessons', elementId: 'lessons-tab' },
     { id: 'settings' as Screen, icon: User, label: 'Profile', elementId: 'settings-tab' },
   ];
